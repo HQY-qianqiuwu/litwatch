@@ -5,7 +5,13 @@ from enum import StrEnum
 from pydantic import BaseModel, Field, computed_field
 
 
+class ProviderAlias(BaseModel):
+    provider: str = Field(min_length=1)
+    provider_id: str = Field(min_length=1)
+
+
 class Paper(BaseModel):
+    paper_id: str | None = None
     title: str = Field(min_length=1)
     authors: list[str] = Field(default_factory=list)
     abstract: str = ""
@@ -16,6 +22,7 @@ class Paper(BaseModel):
     url: str
     source: str
     providers: list[str]
+    aliases: list[ProviderAlias] = Field(default_factory=list)
     score: float = 0.0
 
 
@@ -45,6 +52,7 @@ class SearchStatus(StrEnum):
 
 
 class SearchResult(BaseModel):
+    scan_id: str | None = None
     topic: str
     status: SearchStatus
     papers: list[Paper] = Field(default_factory=list)

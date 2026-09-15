@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from litwatch import api
 from litwatch.core import Paper
 from litwatch.search import SearchService
+from litwatch.storage import SearchRepository
 
 
 def asgi_request(
@@ -123,3 +124,60 @@ def test_invalid_search_request_is_rejected_before_search() -> None:
 
     assert response.status_code == 422
     assert provider.calls == 0
+
+
+def test_api_search_returns_persistent_scan_and_stable_paper_id(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    provider = CountingProvider()
+    application = api.create_app(SearchService([provider]), repository=SearchRepository(path))
+
+    first = asgi_request(
+        application, "POST", "/api/v1/literature/search", {"topic": "acoustic", "limit": 5}
+    )
+    second = asgi_request(
+        application, "POST", "/api/v1/literature/search", {"topic": "acoustic", "limit": 5}
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["scan_id"] != second.json()["scan_id"]
+    assert first.json()["papers"][0]["paper_id"] == second.json()["papers"][0]["paper_id"]
+    assert provider.calls == 2  # one provider request for each API search, never a second search
+    restarted = SearchRepository(path)
+    assert restarted.get_scan(first.json()["scan_id"]).papers[0].paper_id == (
+        first.json()["papers"][0]["paper_id"]
+    )
+    assert restarted.get_paper(first.json()["papers"][0]["paper_id"]).doi == (
+        "10.1000/acoustic"
+    )
+
+
+def test_failed_provider_search_also_persists_scan_diagnostics(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    provider = CountingProvider(RuntimeError("unavailable"))
+    response = asgi_request(
+        api.create_app(SearchService([provider]), repository=SearchRepository(path)),
+        "POST",
+        "/api/v1/literature/search",
+        {"topic": "acoustic", "limit": 5},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["scan_id"]
+    assert SearchRepository(path).get_scan(response.json()["scan_id"]).status == (
+        "all_providers_failed"
+    )
+
+
+def test_app_uses_configured_database_path_for_search(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "configured.sqlite3"
+    monkeypatch.setenv("LITWATCH_DATABASE_PATH", str(path))
+    response = asgi_request(
+        api.create_app(SearchService([CountingProvider()])),
+        "POST",
+        "/api/v1/literature/search",
+        {"topic": "acoustic", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert path.is_file()
+    assert SearchRepository(path).get_scan(response.json()["scan_id"]) is not None
