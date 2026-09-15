@@ -8,7 +8,24 @@ from uuid import uuid4
 from litwatch.core import Paper, SearchResult
 from litwatch.core.identity import normalized_title
 from litwatch.storage.database import Database
-from litwatch.storage.identity import enrich, find_existing, identity_aliases, prepare_paper
+from litwatch.storage.identity import enrich, find_matches, identity_aliases, prepare_paper
+from litwatch.storage.reconciliation import reconcile
+
+
+def _linked_papers(connection, scan_id: str) -> list[Paper]:
+    linked = connection.execute(
+        """SELECT papers.paper_id, papers.payload, scan_papers.score
+           FROM scan_papers JOIN papers USING (paper_id)
+           WHERE scan_papers.scan_id = ? ORDER BY scan_papers.position""",
+        (scan_id,),
+    ).fetchall()
+    papers = []
+    for item in linked:
+        paper = Paper.model_validate_json(item["payload"])
+        paper.paper_id = item["paper_id"]
+        paper.score = item["score"]
+        papers.append(paper)
+    return papers
 
 
 class SearchRepository:
@@ -33,10 +50,31 @@ class SearchRepository:
             )
             for position, paper in enumerate(saved.papers):
                 incoming = prepare_paper(paper)
-                existing = find_existing(connection, incoming)
-                if existing is None:
+                matches = find_matches(connection, incoming)
+                if not matches:
                     incoming.paper_id = f"P-{uuid4().hex}"
                     stored = incoming
+                else:
+                    stored = enrich(reconcile(connection, matches), incoming)
+
+                stored.aliases = [
+                    alias
+                    for alias in stored.aliases
+                    if (
+                        owner := connection.execute(
+                            "SELECT paper_id FROM paper_aliases WHERE kind = 'provider' AND value = ?",
+                            (f"{alias.provider.casefold()}:{alias.provider_id.casefold()}",),
+                        ).fetchone()
+                    ) is None or owner["paper_id"] == stored.paper_id
+                ]
+                if stored.arxiv_id:
+                    arxiv_owner = connection.execute(
+                        "SELECT paper_id FROM paper_aliases WHERE kind = 'arxiv' AND value = ?",
+                        (stored.arxiv_id,),
+                    ).fetchone()
+                    if arxiv_owner is not None and arxiv_owner["paper_id"] != stored.paper_id:
+                        stored.arxiv_id = None
+                if not matches:
                     connection.execute(
                         "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (
@@ -50,7 +88,6 @@ class SearchRepository:
                         ),
                     )
                 else:
-                    stored = enrich(existing, incoming)
                     connection.execute(
                         """UPDATE papers SET normalized_title = ?, doi = ?, arxiv_id = ?,
                            payload = ?, updated_at = ? WHERE paper_id = ?""",
@@ -64,15 +101,38 @@ class SearchRepository:
                         ),
                     )
                 for kind, value in identity_aliases(stored):
+                    owner = connection.execute(
+                        "SELECT paper_id FROM paper_aliases WHERE kind = ? AND value = ?",
+                        (kind, value),
+                    ).fetchone()
+                    if owner is None:
+                        connection.execute(
+                            "INSERT INTO paper_aliases VALUES (?, ?, ?)",
+                            (kind, value, stored.paper_id),
+                        )
+                    elif owner["paper_id"] != stored.paper_id:
+                        raise ValueError(f"identity alias conflict: {kind}:{value}")
+                linked = connection.execute(
+                    "SELECT position, score FROM scan_papers WHERE scan_id = ? AND paper_id = ?",
+                    (saved.scan_id, stored.paper_id),
+                ).fetchone()
+                if linked is None:
                     connection.execute(
-                        "INSERT OR IGNORE INTO paper_aliases VALUES (?, ?, ?)",
-                        (kind, value, stored.paper_id),
+                        "INSERT INTO scan_papers VALUES (?, ?, ?, ?)",
+                        (saved.scan_id, stored.paper_id, position, incoming.score),
                     )
-                saved.papers[position] = stored.model_copy(update={"score": incoming.score})
-                connection.execute(
-                    "INSERT INTO scan_papers VALUES (?, ?, ?, ?)",
-                    (saved.scan_id, stored.paper_id, position, incoming.score),
-                )
+                else:
+                    connection.execute(
+                        """UPDATE scan_papers SET position = ?, score = ?
+                           WHERE scan_id = ? AND paper_id = ?""",
+                        (
+                            min(linked["position"], position),
+                            max(linked["score"], incoming.score),
+                            saved.scan_id,
+                            stored.paper_id,
+                        ),
+                    )
+            saved.papers = _linked_papers(connection, saved.scan_id)
         return saved
 
     def get_paper(self, paper_id: str) -> Paper | None:
@@ -80,6 +140,12 @@ class SearchRepository:
             row = connection.execute(
                 "SELECT paper_id, payload FROM papers WHERE paper_id = ?", (paper_id,)
             ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    """SELECT papers.paper_id, papers.payload FROM paper_redirects
+                       JOIN papers USING (paper_id) WHERE old_paper_id = ?""",
+                    (paper_id,),
+                ).fetchone()
         if row is None:
             return None
         paper = Paper.model_validate_json(row["payload"])
@@ -93,18 +159,7 @@ class SearchRepository:
             ).fetchone()
             if row is None:
                 return None
-            linked = connection.execute(
-                """SELECT papers.paper_id, papers.payload, scan_papers.score
-                   FROM scan_papers JOIN papers USING (paper_id)
-                   WHERE scan_papers.scan_id = ? ORDER BY scan_papers.position""",
-                (scan_id,),
-            ).fetchall()
-        papers = []
-        for item in linked:
-            paper = Paper.model_validate_json(item["payload"])
-            paper.paper_id = item["paper_id"]
-            paper.score = item["score"]
-            papers.append(paper)
+            papers = _linked_papers(connection, scan_id)
         return SearchResult.model_validate(
             {
                 "scan_id": row["scan_id"],

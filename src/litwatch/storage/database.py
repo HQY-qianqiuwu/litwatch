@@ -18,7 +18,6 @@ class Database:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
-        connection.execute("PRAGMA journal_mode=WAL")
         try:
             yield connection
             connection.commit()
@@ -64,5 +63,11 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS paper_aliases_paper_idx
                     ON paper_aliases(paper_id);
+                CREATE TABLE IF NOT EXISTS paper_redirects (
+                    old_paper_id TEXT PRIMARY KEY,
+                    paper_id TEXT NOT NULL REFERENCES papers(paper_id)
+                );
+                CREATE INDEX IF NOT EXISTS paper_redirects_paper_idx
+                    ON paper_redirects(paper_id);
                 """
             )

@@ -173,3 +173,123 @@ def test_concurrent_searches_reuse_one_database_identity(tmp_path) -> None:
     assert ids[0] == ids[1]
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+
+
+def test_historical_aliases_collapse_two_search_results_to_one_scan_paper(tmp_path) -> None:
+    from litwatch.search import deduplicate_papers
+
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    established = deduplicate_papers(
+        [
+            _paper(provider_id="W123", doi="10.1000/acoustic"),
+            _paper(source="crossref", provider_id="C123", providers=["crossref"],
+                   doi="10.1000/acoustic"),
+        ]
+    )
+    first = repository.save(_result(*established))
+    second = repository.save(
+        _result(
+            _paper(title="Metadata title A", provider_id="W123", doi="10.1000/acoustic"),
+            _paper(title="Metadata title B", source="crossref", provider_id="C123",
+                   providers=["crossref"], doi=None),
+        )
+    )
+
+    assert second.paper_count == 1
+    assert second.papers[0].paper_id == first.papers[0].paper_id
+    assert repository.get_scan(second.scan_id).paper_count == 1
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM scan_papers WHERE scan_id = ?", (second.scan_id,)
+        ).fetchone()[0] == 1
+
+
+def test_late_alias_bridge_reconciles_papers_and_keeps_old_id_readable(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    first = repository.save(_result(_paper(title="Early title", doi=None, provider_id="W123")))
+    second = repository.save(
+        _result(_paper(title="Different title", doi="10.1000/bridge", source="crossref",
+                       provider_id="C123", providers=["crossref"]))
+    )
+    bridge = repository.save(
+        _result(_paper(title="Bridge title", doi="10.1000/bridge", provider_id="W123"))
+    )
+
+    canonical_id = first.papers[0].paper_id
+    assert bridge.papers[0].paper_id == canonical_id
+    assert repository.get_scan(second.scan_id).papers[0].paper_id == canonical_id
+    assert repository.get_paper(second.papers[0].paper_id).paper_id == canonical_id
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+        owners = set(connection.execute("SELECT paper_id FROM paper_aliases"))
+        assert owners == {(canonical_id,)}
+        assert connection.execute("SELECT COUNT(*) FROM scan_papers").fetchone()[0] == 3
+
+
+def test_conflicting_doi_cannot_steal_another_papers_provider_alias(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    first = repository.save(_result(_paper(title="First", doi="10.1000/first")))
+    second = repository.save(
+        _result(_paper(title="Second", doi="10.1000/second", provider_id="W123"))
+    )
+
+    assert first.papers[0].paper_id != second.papers[0].paper_id
+    with sqlite3.connect(path) as connection:
+        owner = connection.execute(
+            "SELECT paper_id FROM paper_aliases WHERE kind = 'provider' AND value = 'openalex:w123'"
+        ).fetchone()[0]
+    assert owner == first.papers[0].paper_id
+    assert all(alias.provider_id.casefold() != "w123" for alias in (
+        repository.get_paper(second.papers[0].paper_id).aliases
+    ))
+
+
+def test_conflicting_doi_does_not_claim_another_papers_arxiv_alias(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    first = repository.save(
+        _result(_paper(title="First", doi="10.1000/first", arxiv_id="2401.12345"))
+    )
+    second = repository.save(
+        _result(_paper(title="Second", doi="10.1000/second", source="crossref",
+                       provider_id="C123", providers=["crossref"]))
+    )
+    repeated = repository.save(
+        _result(_paper(title="Third", doi="10.1000/second", arxiv_id="2401.12345",
+                       source="crossref", provider_id="C123", providers=["crossref"]))
+    )
+
+    assert repeated.papers[0].paper_id == second.papers[0].paper_id
+    assert first.papers[0].paper_id != repeated.papers[0].paper_id
+    assert repository.get_paper(second.papers[0].paper_id).arxiv_id is None
+    with sqlite3.connect(path) as connection:
+        owner = connection.execute(
+            "SELECT paper_id FROM paper_aliases WHERE kind = 'arxiv' AND value = '2401.12345'"
+        ).fetchone()[0]
+    assert owner == first.papers[0].paper_id
+
+
+def test_doi_match_wins_over_incompatible_older_arxiv_match(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    older = repository.save(
+        _result(_paper(title="Older arxiv", doi=None, arxiv_id="2401.11111"))
+    )
+    doi_owner = repository.save(
+        _result(_paper(title="DOI owner", doi="10.1000/priority", arxiv_id="2401.22222",
+                       source="crossref", provider_id="C123", providers=["crossref"]))
+    )
+    repeated = repository.save(
+        _result(_paper(title="New metadata", doi="10.1000/priority",
+                       arxiv_id="2401.11111", source="crossref", provider_id="C123",
+                       providers=["crossref"]))
+    )
+
+    assert repeated.papers[0].paper_id == doi_owner.papers[0].paper_id
+    assert older.papers[0].paper_id != repeated.papers[0].paper_id
+    assert repository.get_paper(doi_owner.papers[0].paper_id).arxiv_id == "2401.22222"
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 2

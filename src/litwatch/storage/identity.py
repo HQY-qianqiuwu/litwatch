@@ -35,7 +35,7 @@ def identity_aliases(paper: Paper) -> list[tuple[str, str]]:
     return list(dict.fromkeys(keys))
 
 
-def _compatible(existing: Paper, incoming: Paper, kind: str) -> bool:
+def compatible(existing: Paper, incoming: Paper, kind: str) -> bool:
     if existing.doi and incoming.doi and existing.doi != incoming.doi:
         return False
     return not (
@@ -52,7 +52,8 @@ def _from_row(row: sqlite3.Row) -> Paper:
     return paper
 
 
-def find_existing(connection: sqlite3.Connection, incoming: Paper) -> Paper | None:
+def find_matches(connection: sqlite3.Connection, incoming: Paper) -> list[Paper]:
+    matches: dict[str, Paper] = {}
     for kind, value in identity_aliases(incoming):
         row = connection.execute(
             """SELECT papers.paper_id, papers.payload FROM paper_aliases
@@ -61,19 +62,21 @@ def find_existing(connection: sqlite3.Connection, incoming: Paper) -> Paper | No
         ).fetchone()
         if row is not None:
             candidate = _from_row(row)
-            if _compatible(candidate, incoming, kind):
-                return candidate
+            if compatible(candidate, incoming, kind):
+                matches.setdefault(candidate.paper_id, candidate)
+    if matches:
+        return list(matches.values())
 
     matches = connection.execute(
         "SELECT paper_id, payload FROM papers WHERE normalized_title = ?",
         (normalized_title(incoming.title),),
     ).fetchall()
-    compatible = [
+    title_matches = [
         candidate
         for row in matches
-        if _compatible(candidate := _from_row(row), incoming, "title")
+        if compatible(candidate := _from_row(row), incoming, "title")
     ]
-    return compatible[0] if len(compatible) == 1 else None
+    return title_matches if len(title_matches) == 1 else []
 
 
 def enrich(existing: Paper, incoming: Paper) -> Paper:
