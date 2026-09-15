@@ -16,12 +16,12 @@ Literature discovery is scattered across services, and duplicate records make re
 | --- | --- | --- |
 | 1 | Foundation: installable package, tests, CI | ✅ Complete |
 | 2 | Multi-source search core and search API | ✅ Complete |
-| 3 | SQLite scan and paper persistence | ⏳ Next |
-| 4 | BYOK paper analysis | ⏳ Planned |
+| 3 | SQLite scan and paper persistence | ✅ Complete |
+| 4 | BYOK paper analysis | ⏳ Next |
 | 5 | Local Web UI | ⏳ Planned |
 | 6 | GitHub Pages presentation | ⏳ Planned |
 
-The current `main` branch includes Phase 1 Foundation and Phase 2 Search Core. It provides live multi-source search and a FastAPI search endpoint, but not yet SQLite persistence, AI analysis, or a Web UI. Phase 3 Persistence is next.
+The current `main` branch includes Phase 1 Foundation, Phase 2 Search Core, and Phase 3 Persistence. It provides live multi-source search with persistent scans and stable paper IDs, but not yet AI analysis or a Web UI. Phase 4 BYOK Analysis is next.
 
 ## Planned V1
 
@@ -30,7 +30,7 @@ The current `main` branch includes Phase 1 Foundation and Phase 2 Search Core. I
 - Offer BYOK analysis without committing or permanently storing an LLM key.
 - Provide a local FastAPI interface and, separately, a static Pages presentation.
 
-The search core is complete; persistence, analysis, and presentation remain roadmap items.
+The search core and persistence are complete; analysis and presentation remain roadmap items.
 
 ## Architecture
 
@@ -39,11 +39,11 @@ The current search path is:
 ```text
 Query → SearchService → OpenAlex / arXiv / Crossref
       → normalize → deduplicate → rank → SearchResult
-                          ↑
-                    FastAPI search route
+      → SQLite persistence → scan_id / stable paper_id
+      → FastAPI search response
 ```
 
-Future persistence and analysis will consume this result; neither the API nor a future UI will implement its own provider search logic.
+Future analysis will read persisted papers; neither the API nor a future UI will implement its own provider search logic.
 
 ## Project Structure
 
@@ -53,10 +53,10 @@ src/litwatch/
   core/       shared search models and identities
   providers/  OpenAlex, arXiv, and Crossref adapters
   search/     unified search pipeline
-  storage/    future SQLite persistence (reserved)
+  storage/    SQLite scans, paper identities, and aliases
   analysis/   future BYOK analysis (reserved)
   web/        future local UI (reserved)
-tests/        foundation and search-core tests
+tests/        foundation, search-core, and persistence tests
 .github/workflows/ci.yml  Linux/Windows pytest and independent Ruff checks
 ```
 
@@ -73,7 +73,7 @@ uv run pytest
 uv run ruff check .
 ```
 
-The Phase 2 search API now provides `GET /health`, `GET /api/v1/providers`, and `POST /api/v1/literature/search`. Search results are not persisted until Phase 3.
+The search API provides `GET /health`, `GET /api/v1/providers`, and `POST /api/v1/literature/search`. Search responses include persisted `scan_id` and `paper_id` values.
 
 ## Development Workflow
 
@@ -81,11 +81,11 @@ Keep features on focused branches, add tests for new behavior, and run `uv run p
 
 ## Security
 
-Only `.env.example` belongs in Git. Never commit `.env`, API keys, credentials, user data, generated SQLite files, or a virtual environment. Phase 4 BYOK keys are planned to be request-scoped and excluded from persistence, logs, and responses. Phase 1 requires no secret.
+Only `.env.example` belongs in Git. Never commit `.env`, API keys, credentials, user data, generated SQLite files, or a virtual environment. Phase 4 BYOK keys are planned to be request-scoped and excluded from persistence, logs, and responses. Search and persistence require no secret.
 
 ## Roadmap
 
-Phase 2 established the search core and API without a database or LLM. Phase 3 next adds stable SQLite identities; Phase 4 adds analysis; Phase 5 adds local visualization; Phase 6 adds optional static Pages presentation. Scheduler, Email, Radar, Zotero, Dify, Prompt Library, Windows Task, and Docker are outside this project's V1 scope.
+Phase 2 established the search core and API; Phase 3 added stable SQLite identities and persistent deduplication. Phase 4 next adds BYOK analysis; Phase 5 adds local visualization; Phase 6 adds optional static Pages presentation. Scheduler, Email, Radar, Zotero, Dify, Prompt Library, Windows Task, and Docker are outside this project's V1 scope.
 
 ## License / Attribution
 
