@@ -15,13 +15,13 @@ Literature discovery is scattered across services, and duplicate records make re
 | Phase | Capability | Status |
 | --- | --- | --- |
 | 1 | Foundation: installable package, tests, CI | ✅ Complete |
-| 2 | Multi-source search core and search API | 🚧 In progress |
-| 3 | SQLite scan and paper persistence | ⏳ Planned |
+| 2 | Multi-source search core and search API | ✅ Complete |
+| 3 | SQLite scan and paper persistence | ⏳ Next |
 | 4 | BYOK paper analysis | ⏳ Planned |
 | 5 | Local Web UI | ⏳ Planned |
 | 6 | GitHub Pages presentation | ⏳ Planned |
 
-The current `main` branch is the Phase 1 foundation. It does **not** yet provide live search, a running API, persistence, AI analysis, or a Web UI. Phase 2 work takes place on a separate feature branch until reviewed.
+The current `main` branch includes Phase 1 Foundation and Phase 2 Search Core. It provides live multi-source search and a FastAPI search endpoint, but not yet SQLite persistence, AI analysis, or a Web UI. Phase 3 Persistence is next.
 
 ## Planned V1
 
@@ -30,11 +30,11 @@ The current `main` branch is the Phase 1 foundation. It does **not** yet provide
 - Offer BYOK analysis without committing or permanently storing an LLM key.
 - Provide a local FastAPI interface and, separately, a static Pages presentation.
 
-These are roadmap items, not claims about the current release.
+The search core is complete; persistence, analysis, and presentation remain roadmap items.
 
 ## Architecture
 
-The Phase 2 target is:
+The current search path is:
 
 ```text
 Query → SearchService → OpenAlex / arXiv / Crossref
@@ -49,20 +49,20 @@ Future persistence and analysis will consume this result; neither the API nor a 
 
 ```text
 src/litwatch/
-  api/        FastAPI boundary (reserved in Phase 1)
-  core/       shared domain models (reserved)
-  providers/  academic-source adapters (reserved)
-  search/     unified search pipeline (reserved)
+  api/        FastAPI search boundary
+  core/       shared search models and identities
+  providers/  OpenAlex, arXiv, and Crossref adapters
+  search/     unified search pipeline
   storage/    future SQLite persistence (reserved)
   analysis/   future BYOK analysis (reserved)
   web/        future local UI (reserved)
-tests/        package foundation tests
+tests/        foundation and search-core tests
 .github/workflows/ci.yml  Linux/Windows pytest and independent Ruff checks
 ```
 
 ## Quick Start
 
-Use Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). Today this only installs and validates the foundation:
+Use Python 3.12 or newer and [uv](https://docs.astral.sh/uv/) to install and validate the project:
 
 ```powershell
 git clone https://github.com/HQY-qianqiuwu/litwatch.git
@@ -73,7 +73,7 @@ uv run pytest
 uv run ruff check .
 ```
 
-There is no server or search command on `main` yet. The Phase 2 branch will add `GET /health`, `GET /api/v1/providers`, and `POST /api/v1/literature/search` before documenting live usage.
+The Phase 2 search API now provides `GET /health`, `GET /api/v1/providers`, and `POST /api/v1/literature/search`. Search results are not persisted until Phase 3.
 
 ## Development Workflow
 
@@ -85,7 +85,7 @@ Only `.env.example` belongs in Git. Never commit `.env`, API keys, credentials, 
 
 ## Roadmap
 
-Phase 2 establishes the search core and API without a database or LLM. Phase 3 adds stable SQLite identities; Phase 4 adds analysis; Phase 5 adds local visualization; Phase 6 adds optional static Pages presentation. Scheduler, Email, Radar, Zotero, Dify, Prompt Library, Windows Task, and Docker are outside this project's V1 scope.
+Phase 2 established the search core and API without a database or LLM. Phase 3 next adds stable SQLite identities; Phase 4 adds analysis; Phase 5 adds local visualization; Phase 6 adds optional static Pages presentation. Scheduler, Email, Radar, Zotero, Dify, Prompt Library, Windows Task, and Docker are outside this project's V1 scope.
 
 ## License / Attribution
 

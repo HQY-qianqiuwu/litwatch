@@ -1,14 +1,14 @@
 # Migration Matrix
 
-This new project references the older LitWatch implementation at `fa81340` selectively. It does not copy the old repository or its Git history. Phase assignments are plans, not completed migrations.
+This new project references the older LitWatch implementation at `fa81340` selectively. It does not copy the old repository or its Git history. Phase 2 search capabilities are migrated; later phases remain planned.
 
 | Older capability | New phase | Decision |
 | --- | --- | --- |
-| OpenAlex | Phase 2 | Migrate selectively |
-| arXiv | Phase 2 | Migrate selectively |
-| Crossref | Phase 2 | Migrate selectively |
-| Search core | Phase 2 | Migrate selectively |
-| SQLite identity | Phase 3 | Rebuild |
+| OpenAlex | Phase 2 | Migrated |
+| arXiv | Phase 2 | Migrated |
+| Crossref | Phase 2 | Migrated |
+| Search core | Phase 2 | Migrated |
+| SQLite identity | Phase 3 | Next / rebuild |
 | AI analysis | Phase 4 | Rebuild |
 | Scheduler | — | Omitted |
 | Email | — | Omitted |
