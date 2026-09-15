@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from litwatch.core import ProviderState, SearchResult, SearchStatus
 from litwatch.providers import ArxivProvider, CrossrefProvider, OpenAlexProvider
 from litwatch.search import SearchService
+from litwatch.storage import SearchRepository
 
 
 class SearchRequest(BaseModel):
@@ -24,8 +25,12 @@ class SearchRequest(BaseModel):
         return query
 
 
-def create_app(search_service: SearchService | None = None) -> FastAPI:
-    """Compose public providers once; callers can inject the same service for tests."""
+def create_app(
+    search_service: SearchService | None = None,
+    *,
+    repository: SearchRepository | None = None,
+) -> FastAPI:
+    """Compose providers and persistence once; a request searches only once."""
     if search_service is None:
         search_service = SearchService(
             [
@@ -34,6 +39,8 @@ def create_app(search_service: SearchService | None = None) -> FastAPI:
                 CrossrefProvider(email=os.getenv("LITWATCH_CROSSREF_EMAIL", "")),
             ]
         )
+    if repository is None:
+        repository = SearchRepository(os.getenv("LITWATCH_DATABASE_PATH", "./data/litwatch.db"))
 
     application = FastAPI(title="LitWatch", version="0.1.0")
 
@@ -53,7 +60,7 @@ def create_app(search_service: SearchService | None = None) -> FastAPI:
 
     @application.post("/api/v1/literature/search", response_model=SearchResult)
     def search_literature(request: SearchRequest) -> SearchResult | JSONResponse:
-        result = search_service.search(request.topic, request.limit)
+        result = repository.save(search_service.search(request.topic, request.limit))
         if result.status is SearchStatus.ALL_PROVIDERS_FAILED:
             all_timeouts = all(
                 item.status is ProviderState.TIMEOUT for item in result.provider_results
