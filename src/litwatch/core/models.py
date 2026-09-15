@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, computed_field
 
 
 class Paper(BaseModel):
+    paper_id: str | None = None
     title: str = Field(min_length=1)
     authors: list[str] = Field(default_factory=list)
     abstract: str = ""
@@ -45,6 +46,7 @@ class SearchStatus(StrEnum):
 
 
 class SearchResult(BaseModel):
+    scan_id: str | None = None
     topic: str
     status: SearchStatus
     papers: list[Paper] = Field(default_factory=list)
