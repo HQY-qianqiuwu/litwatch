@@ -134,3 +134,50 @@ def test_partial_provider_fallback_runs_normalize_deduplicate_rank_result() -> N
     assert result.provider_results[1].status == "timeout"
     assert result.provider_results[0].fetched_count == 1
     assert result.provider_results[2].fetched_count == 1
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "upstream_response"),
+    [
+        (
+            OpenAlexProvider,
+            httpx.Response(200, json={"results": [{"id": "https://openalex.org/W999", "title": ""}]}),
+        ),
+        (
+            ArxivProvider,
+            httpx.Response(
+                200,
+                text=(
+                    '<feed xmlns="http://www.w3.org/2005/Atom">'
+                    '<entry><id>https://arxiv.org/abs/2401.99999</id></entry></feed>'
+                ),
+            ),
+        ),
+        (
+            CrossrefProvider,
+            httpx.Response(200, json={"message": {"items": [{"DOI": "10.9999/empty", "title": []}]}}),
+        ),
+    ],
+)
+def test_nonempty_but_unusable_upstream_data_is_not_success_empty(
+    provider_type: type, upstream_response: httpx.Response
+) -> None:
+    with httpx.Client(transport=httpx.MockTransport(lambda _request: upstream_response)) as client:
+        result = search.SearchService([provider_type(client=client)]).search("acoustic", 5)
+
+    assert result.status == "all_providers_failed"
+    assert result.provider_results[0].status == "parse_error"
+    assert result.paper_count == 0
+
+
+def test_crossref_work_without_doi_or_url_is_not_returned_as_openable_paper() -> None:
+    upstream = httpx.Response(
+        200,
+        json={"message": {"items": [{"title": ["Acoustic Localization"], "author": []}]}},
+    )
+    with httpx.Client(transport=httpx.MockTransport(lambda _request: upstream)) as client:
+        result = search.SearchService([CrossrefProvider(client=client)]).search("acoustic", 5)
+
+    assert result.status == "all_providers_failed"
+    assert result.provider_results[0].status == "parse_error"
+    assert result.paper_count == 0

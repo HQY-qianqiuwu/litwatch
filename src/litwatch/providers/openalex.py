@@ -82,4 +82,6 @@ class OpenAlexProvider(HttpProvider):
                 raise TypeError("OpenAlex work must be an object")
             if paper := normalize_work(item):
                 records.append(paper)
+        if payload["results"] and not records:
+            raise TypeError("OpenAlex returned no usable works")
         return records

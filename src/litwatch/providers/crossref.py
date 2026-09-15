@@ -45,6 +45,8 @@ def normalize_work(raw: dict[str, Any]) -> Paper | None:
         return None
     doi = normalize_doi(raw.get("DOI"))
     url = str(raw.get("URL") or (f"https://doi.org/{doi}" if doi else "")).strip()
+    if not url:
+        return None
     authors = []
     for author in raw.get("author") or []:
         if isinstance(author, dict):
@@ -104,4 +106,6 @@ class CrossrefProvider(HttpProvider):
                 raise TypeError("Crossref work must be an object")
             if paper := normalize_work(item):
                 records.append(paper)
+        if items and not records:
+            raise TypeError("Crossref returned no usable works")
         return records

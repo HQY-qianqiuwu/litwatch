@@ -85,6 +85,28 @@ def test_normalized_title_is_the_fallback_identity() -> None:
     assert unique[0].providers == ["openalex", "crossref"]
 
 
+def test_same_title_does_not_override_conflicting_dois() -> None:
+    unique = search.deduplicate_papers(
+        [
+            paper("Methods", source="crossref", provider_id="10.1000/first", doi="10.1000/first"),
+            paper("Methods", source="crossref", provider_id="10.1000/second", doi="10.1000/second"),
+        ]
+    )
+    assert len(unique) == 2
+    assert {item.doi for item in unique} == {"10.1000/first", "10.1000/second"}
+
+
+def test_same_title_does_not_override_conflicting_arxiv_ids() -> None:
+    unique = search.deduplicate_papers(
+        [
+            paper("Acoustic Localization", source="arxiv", provider_id="2401.00001", arxiv_id="2401.00001"),
+            paper("Acoustic Localization", source="arxiv", provider_id="2401.00002", arxiv_id="2401.00002"),
+        ]
+    )
+    assert len(unique) == 2
+    assert {item.arxiv_id for item in unique} == {"2401.00001", "2401.00002"}
+
+
 def test_provider_identity_and_transitive_matches_do_not_leave_duplicate_groups() -> None:
     deduplicate = getattr(search, "deduplicate_papers", None)
     assert deduplicate is not None

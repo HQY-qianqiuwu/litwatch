@@ -39,6 +39,7 @@ def create_app(search_service: SearchService | None = None) -> FastAPI:
 
     @application.get("/health")
     def health() -> dict[str, str]:
+        """Process liveness; individual provider health is reported by each search."""
         return {"status": "ok"}
 
     @application.get("/api/v1/providers")

@@ -74,8 +74,11 @@ class ArxivProvider(HttpProvider):
         root = ET.fromstring(response.content)
         if root.tag != f"{{{ATOM['atom']}}}feed":
             raise ValueError("arXiv response must be an Atom feed")
+        entries = root.findall("atom:entry", ATOM)
         records: list[Paper] = []
-        for entry in root.findall("atom:entry", ATOM):
+        for entry in entries:
             if paper := normalize_entry(entry):
                 records.append(paper)
+        if entries and not records:
+            raise TypeError("arXiv returned no usable entries")
         return records
