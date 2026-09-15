@@ -1,6 +1,6 @@
 """Merge duplicates within one search; no database identity is assigned here."""
 
-from litwatch.core import Paper
+from litwatch.core import Paper, ProviderAlias
 from litwatch.core.identity import normalize_arxiv_id, normalize_doi, normalized_title
 
 
@@ -21,6 +21,20 @@ def _merge(records: list[Paper]) -> Paper:
     merged = records[0].model_copy(deep=True)
     merged.doi = normalize_doi(merged.doi)
     merged.arxiv_id = normalize_arxiv_id(merged.arxiv_id)
+    merged.aliases = list(
+        {
+            (alias.provider.casefold(), alias.provider_id.casefold()): alias
+            for item in records
+            for alias in [
+                *item.aliases,
+                *(
+                    [ProviderAlias(provider=item.source, provider_id=item.provider_id)]
+                    if item.source and item.provider_id
+                    else []
+                ),
+            ]
+        }.values()
+    )
     for item in records[1:]:
         merged.providers = list(dict.fromkeys([*merged.providers, *item.providers, item.source]))
         merged.authors = list(dict.fromkeys([*merged.authors, *item.authors]))
@@ -56,10 +70,11 @@ def deduplicate_papers(papers: list[Paper]) -> list[Paper]:
                 previous = root(seen[key])
                 if current == previous:
                     continue
-                if key[0] == "title" and (
+                if key[0] != "doi" and (
                     (dois[current] and dois[previous] and dois[current] != dois[previous])
                     or (
-                        arxiv_ids[current]
+                        key[0] in {"provider", "title"}
+                        and arxiv_ids[current]
                         and arxiv_ids[previous]
                         and arxiv_ids[current] != arxiv_ids[previous]
                     )

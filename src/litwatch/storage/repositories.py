@@ -8,6 +8,7 @@ from uuid import uuid4
 from litwatch.core import Paper, SearchResult
 from litwatch.core.identity import normalized_title
 from litwatch.storage.database import Database
+from litwatch.storage.identity import enrich, find_existing, identity_aliases, prepare_paper
 
 
 class SearchRepository:
@@ -31,22 +32,46 @@ class SearchRepository:
                 ),
             )
             for position, paper in enumerate(saved.papers):
-                paper.paper_id = f"P-{uuid4().hex}"
-                connection.execute(
-                    "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        paper.paper_id,
-                        normalized_title(paper.title),
-                        paper.doi,
-                        paper.arxiv_id,
-                        paper.model_dump_json(exclude={"paper_id"}),
-                        now,
-                        now,
-                    ),
-                )
+                incoming = prepare_paper(paper)
+                existing = find_existing(connection, incoming)
+                if existing is None:
+                    incoming.paper_id = f"P-{uuid4().hex}"
+                    stored = incoming
+                    connection.execute(
+                        "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            stored.paper_id,
+                            normalized_title(stored.title),
+                            stored.doi,
+                            stored.arxiv_id,
+                            stored.model_dump_json(exclude={"paper_id"}),
+                            now,
+                            now,
+                        ),
+                    )
+                else:
+                    stored = enrich(existing, incoming)
+                    connection.execute(
+                        """UPDATE papers SET normalized_title = ?, doi = ?, arxiv_id = ?,
+                           payload = ?, updated_at = ? WHERE paper_id = ?""",
+                        (
+                            normalized_title(stored.title),
+                            stored.doi,
+                            stored.arxiv_id,
+                            stored.model_dump_json(exclude={"paper_id"}),
+                            now,
+                            stored.paper_id,
+                        ),
+                    )
+                for kind, value in identity_aliases(stored):
+                    connection.execute(
+                        "INSERT OR IGNORE INTO paper_aliases VALUES (?, ?, ?)",
+                        (kind, value, stored.paper_id),
+                    )
+                saved.papers[position] = stored.model_copy(update={"score": incoming.score})
                 connection.execute(
                     "INSERT INTO scan_papers VALUES (?, ?, ?, ?)",
-                    (saved.scan_id, paper.paper_id, position, paper.score),
+                    (saved.scan_id, stored.paper_id, position, incoming.score),
                 )
         return saved
 

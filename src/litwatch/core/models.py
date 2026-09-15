@@ -5,6 +5,11 @@ from enum import StrEnum
 from pydantic import BaseModel, Field, computed_field
 
 
+class ProviderAlias(BaseModel):
+    provider: str = Field(min_length=1)
+    provider_id: str = Field(min_length=1)
+
+
 class Paper(BaseModel):
     paper_id: str | None = None
     title: str = Field(min_length=1)
@@ -17,6 +22,7 @@ class Paper(BaseModel):
     url: str
     source: str
     providers: list[str]
+    aliases: list[ProviderAlias] = Field(default_factory=list)
     score: float = 0.0
 
 

@@ -48,6 +48,35 @@ def test_same_doi_merges_records_and_preserves_both_sources() -> None:
     assert unique[0].abstract == "A useful abstract."
 
 
+def test_single_search_dedup_keeps_both_provider_identities() -> None:
+    unique = search.deduplicate_papers(
+        [
+            paper("Acoustic TDOA", provider_id="W123", doi="10.1000/acoustic"),
+            paper(
+                "Acoustic TDOA",
+                source="crossref",
+                provider_id="10.1000/acoustic",
+                doi="10.1000/acoustic",
+            ),
+        ]
+    )
+    assert len(unique) == 1
+    assert {(alias.provider, alias.provider_id) for alias in unique[0].aliases} == {
+        ("openalex", "W123"),
+        ("crossref", "10.1000/acoustic"),
+    }
+
+
+def test_same_provider_id_cannot_override_conflicting_dois() -> None:
+    unique = search.deduplicate_papers(
+        [
+            paper("Methods", provider_id="W1", doi="10.1000/first"),
+            paper("Methods", provider_id="W1", doi="10.1000/second"),
+        ]
+    )
+    assert len(unique) == 2
+
+
 def test_same_arxiv_id_ignores_version_suffix() -> None:
     deduplicate = getattr(search, "deduplicate_papers", None)
     assert deduplicate is not None

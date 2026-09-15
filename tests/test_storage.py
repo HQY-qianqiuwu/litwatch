@@ -1,6 +1,9 @@
 """SQLite scans remain available across repository instances."""
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 from litwatch import storage
 from litwatch.core import Paper, ProviderResult, ProviderState, SearchResult, SearchStatus
@@ -64,3 +67,109 @@ def test_each_empty_search_has_its_own_persisted_scan(tmp_path) -> None:
     assert first.scan_id != second.scan_id
     assert repository.get_scan(first.scan_id).status == SearchStatus.SUCCESS_EMPTY
     assert repository.get_scan(second.scan_id).papers == []
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            {"doi": "10.1000/ACOUSTIC"},
+            {"doi": "https://doi.org/10.1000/acoustic", "source": "crossref",
+             "provider_id": "10.1000/acoustic", "providers": ["crossref"], "title": "Other title"},
+        ),
+        (
+            {"doi": None, "arxiv_id": "2401.12345", "source": "arxiv",
+             "provider_id": "2401.12345", "providers": ["arxiv"]},
+            {"doi": None, "arxiv_id": "2401.12345v2", "provider_id": "W999",
+             "title": "Other title"},
+        ),
+        (
+            {"doi": None, "provider_id": "W123"},
+            {"doi": None, "provider_id": "w123", "title": "Other title"},
+        ),
+        (
+            {"doi": None, "provider_id": "W123"},
+            {"doi": None, "source": "crossref", "provider_id": "X999",
+             "providers": ["crossref"], "title": "underwater acoustic: TDOA localization!"},
+        ),
+    ],
+    ids=["doi", "arxiv", "provider", "title-fallback"],
+)
+def test_paper_identity_reused_across_searches_and_restart(tmp_path, first, second) -> None:
+    repository = storage.SearchRepository(tmp_path / "litwatch.sqlite3")
+    original = repository.save(_result(_paper(**first)))
+    restarted = storage.SearchRepository(tmp_path / "litwatch.sqlite3")
+    repeated = restarted.save(_result(_paper(**second)))
+
+    assert repeated.scan_id != original.scan_id
+    assert repeated.papers[0].paper_id == original.papers[0].paper_id
+    with sqlite3.connect(tmp_path / "litwatch.sqlite3") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM scan_papers").fetchone()[0] == 2
+
+
+def test_conflicting_doi_does_not_merge_on_title_or_provider_id(tmp_path) -> None:
+    repository = storage.SearchRepository(tmp_path / "litwatch.sqlite3")
+    first = repository.save(_result(_paper(doi="10.1000/first")))
+    second = repository.save(_result(_paper(doi="10.1000/second")))
+
+    assert first.papers[0].paper_id != second.papers[0].paper_id
+    with sqlite3.connect(tmp_path / "litwatch.sqlite3") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 2
+
+
+def test_aliases_from_both_providers_survive_single_search_and_restart(tmp_path) -> None:
+    from litwatch.search import deduplicate_papers
+
+    merged = deduplicate_papers(
+        [
+            _paper(provider_id="W123"),
+            _paper(source="crossref", provider_id="10.1000/acoustic",
+                   providers=["crossref"]),
+        ]
+    )
+    assert len(merged) == 1
+    path = tmp_path / "litwatch.sqlite3"
+    saved = storage.SearchRepository(path).save(_result(*merged))
+    loaded = storage.SearchRepository(path).get_paper(saved.papers[0].paper_id)
+
+    assert {(alias.provider, alias.provider_id) for alias in loaded.aliases} == {
+        ("openalex", "W123"),
+        ("crossref", "10.1000/acoustic"),
+    }
+    with sqlite3.connect(path) as connection:
+        aliases = set(connection.execute("SELECT kind, value FROM paper_aliases"))
+        assert ("doi", "10.1000/acoustic") in aliases
+        assert ("provider", "openalex:w123") in aliases
+        assert ("provider", "crossref:10.1000/acoustic") in aliases
+
+
+def test_repeat_search_enriches_without_erasing_existing_fields(tmp_path) -> None:
+    repository = storage.SearchRepository(tmp_path / "litwatch.sqlite3")
+    first = repository.save(
+        _result(_paper(abstract="Useful existing abstract", authors=["Lin Researcher"]))
+    )
+    second = repository.save(
+        _result(_paper(abstract="", authors=[], url="", source="crossref",
+                       provider_id="10.1000/acoustic", providers=["crossref"]))
+    )
+    paper = repository.get_paper(first.papers[0].paper_id)
+
+    assert second.papers[0].paper_id == first.papers[0].paper_id
+    assert paper.abstract == "Useful existing abstract"
+    assert paper.authors == ["Lin Researcher"]
+    assert paper.url == "https://openalex.org/W123"
+
+
+def test_concurrent_searches_reuse_one_database_identity(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+
+    def save_once(_index: int) -> str:
+        return storage.SearchRepository(path).save(_result(_paper())).papers[0].paper_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ids = list(pool.map(save_once, range(2)))
+
+    assert ids[0] == ids[1]
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
