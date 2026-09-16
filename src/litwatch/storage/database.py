@@ -69,5 +69,14 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS paper_redirects_paper_idx
                     ON paper_redirects(paper_id);
+                CREATE TABLE IF NOT EXISTS analyses (
+                    analysis_id TEXT PRIMARY KEY,
+                    paper_id TEXT NOT NULL REFERENCES papers(paper_id),
+                    analysis_mode TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS analyses_paper_idx ON analyses(paper_id);
                 """
             )
