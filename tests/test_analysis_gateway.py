@@ -5,6 +5,7 @@ import pytest
 
 from litwatch.analysis import (
     GatewayResponseError,
+    GatewayUpstreamError,
     InvalidBaseUrlError,
     OpenAICompatibleGateway,
 )
@@ -56,6 +57,27 @@ def test_gateway_returns_validated_quick_scan_without_following_redirects() -> N
         "url": "https://llm.example.test/v1/chat/completions",
         "authorization": "Bearer secret-test-key",
     }
+
+
+def test_gateway_does_not_follow_redirects() -> None:
+    calls: list[str] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(reply), follow_redirects=True) as client,
+        pytest.raises(GatewayUpstreamError),
+    ):
+        OpenAICompatibleGateway(client=client, resolver=public_resolver).quick_scan(
+            base_url="https://llm.example.test/v1",
+            model="model",
+            api_key="secret-test-key",
+            paper_text="paper",
+        )
+
+    assert calls == ["https://llm.example.test/v1/chat/completions"]
 
 
 @pytest.mark.parametrize(
