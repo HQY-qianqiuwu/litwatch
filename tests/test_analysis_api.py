@@ -37,6 +37,11 @@ class NoSearchService:
         raise AssertionError("analysis must not trigger SearchService")
 
 
+class NoAnalysisGateway:
+    def quick_scan(self, **_kwargs: object) -> None:
+        raise AssertionError("GET analysis must not invoke the LLM gateway")
+
+
 def public_resolver(_host: str, _port: int, **_kwargs: object) -> list[tuple]:
     return [(2, 1, 6, "", ("93.184.216.34", 443))]
 
@@ -122,6 +127,48 @@ def test_analyze_and_get_round_trip_uses_header_key_without_search(tmp_path) -> 
         assert secret.encode() not in path.read_bytes()
     finally:
         client.close()
+
+
+def test_mock_e2e_survives_app_and_repository_recreation(tmp_path) -> None:
+    application, path, paper, client = make_app(
+        tmp_path, lambda _request: httpx.Response(200, json=llm_payload())
+    )
+    try:
+        created = asgi_request(
+            application,
+            "POST",
+            "/api/v1/literature/analyze",
+            payload={
+                "paper_id": paper.paper_id,
+                "analysis_mode": "quick_scan",
+                "base_url": "https://llm.example.test/v1",
+                "model": "example-model",
+            },
+            headers={"X-LitWatch-LLM-Key": "ephemeral-key"},
+        )
+    finally:
+        client.close()
+    assert created.status_code == 200
+
+    rebuilt_papers = SearchRepository(path)
+    rebuilt_service = PaperAnalysisService(
+        rebuilt_papers,
+        AnalysisRepository(path),
+        NoAnalysisGateway(),
+    )
+    rebuilt_app = create_app(
+        NoSearchService(),
+        repository=rebuilt_papers,
+        analysis_service=rebuilt_service,
+    )
+    restored = asgi_request(
+        rebuilt_app,
+        "GET",
+        f"/api/v1/analyses/{created.json()['analysis_id']}",
+    )
+
+    assert restored.status_code == 200
+    assert restored.json() == created.json()
 
 
 def test_analyze_missing_paper_is_404_without_llm_request(tmp_path) -> None:
