@@ -109,10 +109,11 @@ class OpenAICompatibleGateway:
                 {
                     "role": "system",
                     "content": (
-                        "Analyze only the supplied paper metadata. Return one JSON object with "
-                        "exactly these string fields: summary, research_question, methodology, "
-                        "key_findings, innovations, limitations, relevance. Use 'unavailable' for "
-                        "anything not supported by the supplied metadata; never invent details."
+                        "Analyze only the supplied paper metadata. Return one JSON object. "
+                        "summary, research_question, methodology, and relevance must be strings. "
+                        "key_findings, innovations, and limitations must be arrays of strings. "
+                        "Use 'unavailable' for an unsupported string field and ['unavailable'] "
+                        "for an unsupported array field; never invent details."
                     ),
                 },
                 {"role": "user", "content": paper_text},

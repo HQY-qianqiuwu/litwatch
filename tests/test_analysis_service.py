@@ -12,9 +12,9 @@ RESULT = QuickScan(
     summary="A concise summary.",
     research_question="How can TDOA improve localization?",
     methodology="Simulation and field experiments.",
-    key_findings="The method reduced error.",
-    innovations="A robust timing estimator.",
-    limitations="Limited field sites.",
+    key_findings=["The method reduced error."],
+    innovations=["A robust timing estimator."],
+    limitations=["Limited field sites."],
     relevance="Relevant to underwater localization.",
 )
 

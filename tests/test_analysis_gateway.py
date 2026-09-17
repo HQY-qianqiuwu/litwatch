@@ -19,14 +19,14 @@ def private_resolver(_host: str, _port: int, **_kwargs: object) -> list[tuple]:
     return [(2, 1, 6, "", ("10.0.0.7", 443))]
 
 
-def quick_scan_payload() -> dict[str, str]:
+def quick_scan_payload() -> dict[str, object]:
     return {
         "summary": "A concise summary.",
         "research_question": "How can TDOA improve localization?",
         "methodology": "Simulation and field experiments.",
-        "key_findings": "The proposed method reduced error.",
-        "innovations": "A robust timing estimator.",
-        "limitations": "Limited field sites.",
+        "key_findings": ["The proposed method reduced error."],
+        "innovations": ["A robust timing estimator."],
+        "limitations": ["Limited field sites."],
         "relevance": "Directly relevant to underwater localization.",
     }
 
@@ -128,6 +128,30 @@ def test_gateway_rejects_malformed_llm_response(payload: dict) -> None:
     with (
         httpx.Client(
             transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+        ) as client,
+        pytest.raises(GatewayResponseError),
+    ):
+        OpenAICompatibleGateway(client=client, resolver=public_resolver).quick_scan(
+            base_url="https://llm.example.test/v1",
+            model="model",
+            api_key="secret-test-key",
+            paper_text="paper",
+        )
+
+
+@pytest.mark.parametrize("field", ["key_findings", "innovations", "limitations"])
+def test_gateway_rejects_string_for_list_field(field: str) -> None:
+    payload = quick_scan_payload()
+    payload[field] = "must be an array"
+    response = {
+        "choices": [{"message": {"content": __import__("json").dumps(payload)}}]
+    }
+
+    with (
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(200, json=response)
+            )
         ) as client,
         pytest.raises(GatewayResponseError),
     ):

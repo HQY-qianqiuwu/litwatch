@@ -11,9 +11,9 @@ class QuickScan(BaseModel):
     summary: str = Field(min_length=1)
     research_question: str = Field(min_length=1)
     methodology: str = Field(min_length=1)
-    key_findings: str = Field(min_length=1)
-    innovations: str = Field(min_length=1)
-    limitations: str = Field(min_length=1)
+    key_findings: list[str] = Field(min_length=1)
+    innovations: list[str] = Field(min_length=1)
+    limitations: list[str] = Field(min_length=1)
     relevance: str = Field(min_length=1)
 
 
