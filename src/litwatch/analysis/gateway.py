@@ -4,8 +4,10 @@ import ipaddress
 import json
 import socket
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
+import httpcore
 import httpx
 from pydantic import ValidationError
 
@@ -30,6 +32,14 @@ class GatewayResponseError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class _ValidatedEndpoint:
+    base_url: str
+    hostname: str
+    port: int
+    addresses: tuple[str, ...]
+
+
 def _is_public(address: str) -> bool:
     ip = ipaddress.ip_address(address)
     return bool(
@@ -43,7 +53,9 @@ def _is_public(address: str) -> bool:
     )
 
 
-def validate_base_url(base_url: str, resolver: Resolver = socket.getaddrinfo) -> str:
+def _validated_endpoint(
+    base_url: str, resolver: Resolver = socket.getaddrinfo
+) -> _ValidatedEndpoint:
     try:
         parsed = urlsplit(base_url.strip())
         port = parsed.port or 443
@@ -64,21 +76,91 @@ def validate_base_url(base_url: str, resolver: Resolver = socket.getaddrinfo) ->
 
     try:
         literal = ipaddress.ip_address(hostname.strip("[]"))
-        addresses = {str(literal)}
+        addresses = (str(literal),)
     except ValueError:
         try:
-            addresses = {
-                str(item[4][0])
-                for item in resolver(hostname, port, type=socket.SOCK_STREAM)
-                if item[4]
-            }
-        except OSError:
+            addresses = tuple(
+                dict.fromkeys(
+                    str(ipaddress.ip_address(item[4][0]))
+                    for item in resolver(hostname, port, type=socket.SOCK_STREAM)
+                    if item[4]
+                )
+            )
+        except (OSError, ValueError):
             raise InvalidBaseUrlError("LLM base URL hostname could not be resolved") from None
     if not addresses or any(not _is_public(address) for address in addresses):
         raise InvalidBaseUrlError("LLM base URL resolves to a non-public address")
 
     path = parsed.path.rstrip("/")
-    return urlunsplit(("https", parsed.netloc, path, "", ""))
+    return _ValidatedEndpoint(
+        base_url=urlunsplit(("https", parsed.netloc, path, "", "")),
+        hostname=hostname,
+        port=port,
+        addresses=addresses,
+    )
+
+
+def validate_base_url(base_url: str, resolver: Resolver = socket.getaddrinfo) -> str:
+    return _validated_endpoint(base_url, resolver).base_url
+
+
+class _PinnedNetworkBackend(httpcore.NetworkBackend):
+    """Connect an already-validated origin to its captured public addresses."""
+
+    def __init__(
+        self,
+        endpoint: _ValidatedEndpoint,
+        backend: httpcore.NetworkBackend,
+    ) -> None:
+        self.endpoint = endpoint
+        self.backend = backend
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ) -> httpcore.NetworkStream:
+        if host.casefold() != self.endpoint.hostname.casefold() or port != self.endpoint.port:
+            raise httpcore.ConnectError("connection target differs from validated LLM origin")
+
+        last_error: httpcore.ConnectError | httpcore.ConnectTimeout | None = None
+        for address in self.endpoint.addresses:
+            try:
+                return self.backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as error:
+                last_error = error
+        assert last_error is not None
+        raise last_error
+
+    def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options=None,
+    ) -> httpcore.NetworkStream:
+        del path, timeout, socket_options
+        raise httpcore.ConnectError("Unix sockets are not allowed for LLM requests")
+
+
+class _PinnedHTTPTransport(httpx.HTTPTransport):
+    def __init__(
+        self,
+        endpoint: _ValidatedEndpoint,
+        backend: httpcore.NetworkBackend,
+    ) -> None:
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(verify=True, trust_env=False),
+            network_backend=_PinnedNetworkBackend(endpoint, backend),
+        )
 
 
 class OpenAICompatibleGateway:
@@ -87,10 +169,12 @@ class OpenAICompatibleGateway:
         *,
         client: httpx.Client | None = None,
         resolver: Resolver = socket.getaddrinfo,
+        network_backend: httpcore.NetworkBackend | None = None,
         timeout: float = 30.0,
     ) -> None:
         self.client = client
         self.resolver = resolver
+        self.network_backend = network_backend
         self.timeout = timeout
 
     def quick_scan(
@@ -101,7 +185,7 @@ class OpenAICompatibleGateway:
         api_key: str,
         paper_text: str,
     ) -> QuickScan:
-        safe_base_url = validate_base_url(base_url, self.resolver)
+        endpoint = _validated_endpoint(base_url, self.resolver)
         payload = {
             "model": model,
             "temperature": 0,
@@ -122,10 +206,19 @@ class OpenAICompatibleGateway:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         try:
             if self.client is None:
-                with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
-                    response = self._send(client, safe_base_url, headers, payload)
+                transport = _PinnedHTTPTransport(
+                    endpoint,
+                    self.network_backend or httpcore.SyncBackend(),
+                )
+                with httpx.Client(
+                    timeout=self.timeout,
+                    follow_redirects=False,
+                    trust_env=False,
+                    transport=transport,
+                ) as client:
+                    response = self._send(client, endpoint.base_url, headers, payload)
             else:
-                response = self._send(self.client, safe_base_url, headers, payload)
+                response = self._send(self.client, endpoint.base_url, headers, payload)
         except httpx.TimeoutException:
             raise GatewayTimeoutError("LLM request timed out") from None
         except httpx.HTTPError:
