@@ -41,6 +41,9 @@ def _reparent(connection: sqlite3.Connection, old_id: str, canonical_id: str) ->
     connection.execute(
         "INSERT INTO paper_redirects VALUES (?, ?)", (old_id, canonical_id)
     )
+    connection.execute(
+        "UPDATE analyses SET paper_id = ? WHERE paper_id = ?", (canonical_id, old_id)
+    )
     connection.execute("DELETE FROM papers WHERE paper_id = ?", (old_id,))
 
 
