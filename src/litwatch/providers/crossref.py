@@ -26,6 +26,12 @@ def _abstract(value: object) -> str:
     return " ".join(html.unescape(plain).split())
 
 
+def _text_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
 def _year(raw: dict[str, Any]) -> int | None:
     for key in ("published", "published-online", "published-print", "issued"):
         date_info = raw.get(key)
@@ -65,6 +71,8 @@ def normalize_work(raw: dict[str, Any]) -> Paper | None:
         url=url,
         source="crossref",
         providers=["crossref"],
+        journal=_first_text(raw.get("container-title")) or None,
+        journal_issns=_text_list(raw.get("ISSN")),
     )
 
 

@@ -36,6 +36,10 @@ def normalize_work(raw: dict[str, Any]) -> Paper | None:
         and (name := str(entry["author"].get("display_name") or "").strip())
     ]
     location = raw.get("primary_location") or {}
+    source = location.get("source") if isinstance(location, dict) else None
+    source = source if isinstance(source, dict) else {}
+    source_id = str(source.get("id") or "").strip().rsplit("/", 1)[-1]
+    journal_issns = source.get("issn") if isinstance(source.get("issn"), list) else []
     ids = raw.get("ids") or {}
     year = raw.get("publication_year")
     return Paper(
@@ -49,6 +53,9 @@ def normalize_work(raw: dict[str, Any]) -> Paper | None:
         url=location.get("landing_page_url") or raw.get("doi") or identifier,
         source="openalex",
         providers=["openalex"],
+        journal=str(source.get("display_name") or "").strip() or None,
+        journal_issns=[str(value).strip() for value in journal_issns if str(value).strip()],
+        journal_source_ids={"openalex": source_id} if source_id else {},
     )
 
 

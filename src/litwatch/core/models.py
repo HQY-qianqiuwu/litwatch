@@ -1,6 +1,7 @@
 """Provider-independent search contracts."""
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -24,6 +25,22 @@ class Paper(BaseModel):
     providers: list[str]
     aliases: list[ProviderAlias] = Field(default_factory=list)
     score: float = 0.0
+    journal: str | None = None
+    journal_id: str | None = None
+    journal_issns: list[str] = Field(default_factory=list)
+    journal_source_ids: dict[str, str] = Field(default_factory=dict)
+    acoustic_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
+    is_priority_journal: bool = False
+
+    @computed_field
+    @property
+    def abstract_status(self) -> Literal["complete", "pending"]:
+        return "complete" if self.abstract.strip() else "pending"
+
+    @computed_field
+    @property
+    def analysis_eligible(self) -> bool:
+        return self.abstract_status == "complete"
 
 
 class ProviderState(StrEnum):

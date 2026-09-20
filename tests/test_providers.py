@@ -25,7 +25,17 @@ def test_openalex_normalizes_work_metadata() -> None:
                             {"author": {"display_name": "Ada Researcher"}, "author_position": "first"}
                         ],
                         "abstract_inverted_index": {"Underwater": [0], "acoustic": [1], "TDOA": [2]},
-                        "primary_location": {"landing_page_url": "https://example.org/work"},
+                        "primary_location": {
+                            "landing_page_url": "https://example.org/work",
+                            "source": {
+                                "id": "https://openalex.org/S11296630",
+                                "display_name": (
+                                    "The Journal of the Acoustical Society of America"
+                                ),
+                                "issn": ["0001-4966", "1520-8524"],
+                                "issn_l": "0001-4966",
+                            },
+                        },
                     }
                 ],
             },
@@ -43,6 +53,9 @@ def test_openalex_normalizes_work_metadata() -> None:
     assert records[0].provider_id == "W123"
     assert records[0].providers == ["openalex"]
     assert records[0].url == "https://example.org/work"
+    assert records[0].journal == "The Journal of the Acoustical Society of America"
+    assert records[0].journal_issns == ["0001-4966", "1520-8524"]
+    assert records[0].journal_source_ids == {"openalex": "S11296630"}
 
 
 def test_arxiv_normalizes_atom_entry() -> None:
@@ -58,6 +71,7 @@ def test_arxiv_normalizes_atom_entry() -> None:
         <published>2026-07-01T00:00:00Z</published>
         <author><name>Lin Researcher</name></author>
         <arxiv:doi>10.2000/ACOUSTIC</arxiv:doi>
+        <arxiv:journal_ref>IEEE Journal of Oceanic Engineering 49 (2024)</arxiv:journal_ref>
       </entry>
     </feed>"""
 
@@ -78,6 +92,9 @@ def test_arxiv_normalizes_atom_entry() -> None:
     assert records[0].year == 2026
     assert records[0].source == "arxiv"
     assert records[0].provider_id == "2401.12345"
+    assert records[0].journal == "IEEE Journal of Oceanic Engineering 49 (2024)"
+    assert records[0].journal_issns == []
+    assert records[0].journal_source_ids == {}
 
 
 def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
@@ -99,6 +116,8 @@ def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
                             "author": [{"given": "Marie", "family": "Researcher"}],
                             "issued": {"date-parts": [[2025, 3, 1]]},
                             "URL": "https://doi.org/10.3000/ACOUSTIC",
+                            "container-title": ["Ocean Engineering"],
+                            "ISSN": ["0029-8018", "1873-5258"],
                         }
                     ]
                 },
@@ -116,3 +135,6 @@ def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
     assert records[0].year == 2025
     assert records[0].source == "crossref"
     assert records[0].provider_id == "10.3000/acoustic"
+    assert records[0].journal == "Ocean Engineering"
+    assert records[0].journal_issns == ["0029-8018", "1873-5258"]
+    assert records[0].journal_source_ids == {}

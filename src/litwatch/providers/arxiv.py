@@ -40,6 +40,7 @@ def normalize_entry(entry: ET.Element) -> Paper | None:
         url=f"https://arxiv.org/abs/{identifier}",
         source="arxiv",
         providers=["arxiv"],
+        journal=_text(entry, "arxiv:journal_ref") or None,
     )
 
 

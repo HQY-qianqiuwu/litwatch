@@ -22,6 +22,24 @@ def test_paper_carries_the_provider_independent_metadata() -> None:
 
     assert paper.model_dump()["authors"] == ["A. Researcher"]
     assert paper.model_dump()["score"] == 0.0
+    assert paper.model_dump()["abstract_status"] == "complete"
+    assert paper.model_dump()["analysis_eligible"] is True
+
+
+def test_paper_derives_pending_analysis_state_from_blank_abstract() -> None:
+    paper = core.Paper(
+        title="Metadata-only acoustic paper",
+        abstract="   ",
+        provider_id="W-pending",
+        url="https://example.org/pending",
+        source="openalex",
+        providers=["openalex"],
+        analysis_eligible=True,
+    )
+
+    payload = paper.model_dump()
+    assert payload["abstract_status"] == "pending"
+    assert payload["analysis_eligible"] is False
 
 
 def test_search_result_reports_paper_count_and_provider_diagnostics() -> None:
