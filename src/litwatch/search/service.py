@@ -10,6 +10,10 @@ from pydantic import ValidationError
 from litwatch.core import Paper, ProviderResult, ProviderState, SearchResult, SearchStatus
 from litwatch.journals import JOURNAL_REGISTRY
 from litwatch.providers.base import LiteratureProvider, ProviderSearchCriteria
+from litwatch.search.acoustic import (
+    ACOUSTIC_HARD_FILTER_THRESHOLD,
+    score_acoustic_relevance,
+)
 from litwatch.search.deduplication import deduplicate_papers
 from litwatch.search.ranking import rank_papers
 
@@ -106,7 +110,51 @@ class SearchService:
             status.status in {ProviderState.SUCCESS, ProviderState.EMPTY} for status in statuses
         )
         failures = len(statuses) - working
-        papers = rank_papers(query, deduplicate_papers(candidates))[:limit] if working else []
+        papers: list[Paper] = []
+        if working:
+            resolved_papers: list[Paper] = []
+            for paper in deduplicate_papers(candidates):
+                journal = JOURNAL_REGISTRY.resolve_identity(
+                    issns=paper.journal_issns,
+                    provider_source_ids=paper.journal_source_ids,
+                    internal_id=paper.journal_id,
+                    name=paper.journal,
+                )
+                if journal is not None:
+                    paper = paper.model_copy(
+                        update={
+                            "journal": journal.canonical_name,
+                            "journal_id": journal.journal_id,
+                            "is_priority_journal": journal.priority > 0,
+                        }
+                    )
+                resolved_papers.append(paper)
+
+            requested_ids = {journal.journal_id for journal in requested_journals}
+            filtered_papers = [
+                paper
+                for paper in resolved_papers
+                if (year_from is None or paper.year is not None and paper.year >= year_from)
+                and (year_to is None or paper.year is not None and paper.year <= year_to)
+                and (not requested_ids or paper.journal_id in requested_ids)
+            ]
+            scored_papers = [
+                paper.model_copy(
+                    update={"acoustic_relevance": score_acoustic_relevance(paper)}
+                )
+                for paper in filtered_papers
+            ]
+            if requested_ids:
+                scored_papers = [
+                    paper
+                    for paper in scored_papers
+                    if paper.acoustic_relevance >= ACOUSTIC_HARD_FILTER_THRESHOLD
+                ]
+            papers = rank_papers(
+                query,
+                scored_papers,
+                journal_mode=bool(requested_ids),
+            )[:limit]
         for status in statuses:
             status.returned_count = sum(status.provider in paper.providers for paper in papers)
 

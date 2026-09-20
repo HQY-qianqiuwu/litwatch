@@ -29,15 +29,30 @@ class FakeProvider:
         return self.records
 
 
-def paper(title: str = "Acoustic TDOA Localization") -> Paper:
+def paper(
+    title: str = "Acoustic TDOA Localization",
+    *,
+    doi: str = "10.1000/acoustic",
+    source: str = "openalex",
+    provider_id: str = "W1",
+    abstract: str = "",
+    year: int | None = 2026,
+    journal: str | None = None,
+    journal_issns: list[str] | None = None,
+    journal_source_ids: dict[str, str] | None = None,
+) -> Paper:
     return Paper(
         title=title,
-        year=2026,
-        doi="10.1000/acoustic",
-        provider_id="W1",
+        abstract=abstract,
+        year=year,
+        doi=doi,
+        provider_id=provider_id,
         url="https://example.org/work",
-        source="openalex",
-        providers=["openalex"],
+        source=source,
+        providers=[source],
+        journal=journal,
+        journal_issns=journal_issns or [],
+        journal_source_ids=journal_source_ids or {},
     )
 
 
@@ -78,13 +93,15 @@ def test_four_search_statuses_and_one_call_per_provider(
 def test_journal_search_overfetches_then_applies_the_final_limit() -> None:
     records = [
         Paper(
-            title=f"Acoustic localization study {index}",
+            title=f"Underwater acoustic localization study {index}",
             year=2026 - index,
             doi=f"10.1000/acoustic-{index}",
             provider_id=f"W{index}",
             url=f"https://example.org/work/{index}",
             source="openalex",
             providers=["openalex"],
+            journal="The Journal of the Acoustical Society of America",
+            journal_issns=["0001-4966"],
         )
         for index in range(8)
     ]
@@ -104,6 +121,163 @@ def test_journal_search_overfetches_then_applies_the_final_limit() -> None:
     assert criteria is not None
     assert [journal.journal_id for journal in criteria.journals] == ["jasa"]
     assert (criteria.year_from, criteria.year_to) == (2020, 2026)
+
+
+def test_generic_search_keeps_non_acoustic_papers_without_journal_filter() -> None:
+    candidate = paper(
+        "Quantum error correction in superconducting qubits",
+        journal="Nature",
+        journal_issns=["0028-0836"],
+    )
+
+    result = search.SearchService([FakeProvider("openalex", [candidate])]).search(
+        "quantum error correction", 5
+    )
+
+    assert result.status == "success"
+    assert result.papers[0].title == candidate.title
+    assert result.papers[0].journal_id == "nature"
+    assert result.papers[0].acoustic_relevance == 0.0
+
+
+def test_journal_search_requires_requested_journal_and_acoustic_relevance() -> None:
+    records = [
+        paper(
+            "Quantum error correction in superconducting qubits",
+            doi="10.1000/nature-quantum",
+            provider_id="W-nature",
+            journal="Nature",
+            journal_issns=["0028-0836"],
+        ),
+        paper(
+            "Underwater acoustic TDOA source localization",
+            doi="10.1000/jasa-acoustic",
+            provider_id="W-jasa",
+            journal="Incorrect provider label",
+            journal_issns=["0001-4966"],
+        ),
+        paper(
+            "Sonar beamforming with hydrophone arrays",
+            doi="10.1000/joe-acoustic",
+            provider_id="W-joe",
+            journal="IEEE Journal of Oceanic Engineering",
+            journal_source_ids={"openalex": "S132957497"},
+        ),
+        paper(
+            "Underwater acoustic propagation",
+            doi="10.1000/ocean-acoustic",
+            provider_id="W-ocean",
+            journal="Ocean Engineering",
+            journal_issns=["0029-8018"],
+        ),
+    ]
+
+    result = search.SearchService([FakeProvider("openalex", records)]).search(
+        "underwater acoustic localization",
+        10,
+        journals=["JASA", "IEEE J.O.E.", "Nature"],
+    )
+
+    assert result.status == "success"
+    assert {item.journal_id for item in result.papers} == {"jasa", "ieee_joe"}
+    assert all(item.acoustic_relevance > 0 for item in result.papers)
+    assert {item.doi for item in result.papers} == {
+        "10.1000/jasa-acoustic",
+        "10.1000/joe-acoustic",
+    }
+
+
+def test_year_filter_runs_after_cross_provider_deduplication() -> None:
+    openalex = FakeProvider(
+        "openalex",
+        [
+            paper(
+                "Underwater acoustic propagation",
+                doi="10.1000/merged-year",
+                provider_id="W-year",
+                year=None,
+                journal_issns=["0001-4966"],
+            )
+        ],
+    )
+    crossref = FakeProvider(
+        "crossref",
+        [
+            paper(
+                "Underwater acoustic propagation",
+                doi="10.1000/merged-year",
+                source="crossref",
+                provider_id="10.1000/merged-year",
+                year=2024,
+                journal="JASA",
+            )
+        ],
+    )
+
+    result = search.SearchService([openalex, crossref]).search(
+        "underwater acoustic propagation",
+        5,
+        journals=["jasa"],
+        year_from=2024,
+        year_to=2024,
+    )
+
+    assert result.paper_count == 1
+    assert result.papers[0].year == 2024
+    assert result.papers[0].providers == ["openalex", "crossref"]
+
+
+def test_local_filter_empty_is_success_empty_not_provider_failure() -> None:
+    result = search.SearchService(
+        [
+            FakeProvider(
+                "openalex",
+                [
+                    paper(
+                        "Quantum materials",
+                        journal="Nature",
+                        journal_issns=["0028-0836"],
+                    )
+                ],
+            )
+        ]
+    ).search("underwater acoustics", 5, journals=["nature"])
+
+    assert result.status == "success_empty"
+    assert result.paper_count == 0
+    assert result.provider_results[0].status == "success"
+    assert result.provider_results[0].fetched_count == 1
+
+
+def test_acoustic_relevance_outranks_priority_bonus_in_journal_mode() -> None:
+    records = [
+        paper(
+            "Acoustic sensing",
+            doi="10.1000/nature-weak",
+            provider_id="W-nature-weak",
+            journal="Nature",
+            journal_issns=["0028-0836"],
+        ),
+        paper(
+            "Underwater acoustic source localization with sonar beamforming",
+            doi="10.1000/jasa-strong",
+            provider_id="W-jasa-strong",
+            journal="JASA",
+            journal_issns=["0001-4966"],
+        ),
+    ]
+
+    result = search.SearchService([FakeProvider("openalex", records)]).search(
+        "acoustic sensing",
+        5,
+        journals=["nature", "jasa"],
+    )
+
+    assert [item.doi for item in result.papers] == [
+        "10.1000/jasa-strong",
+        "10.1000/nature-weak",
+    ]
+    assert result.papers[0].acoustic_relevance > result.papers[1].acoustic_relevance
 
 
 def test_provider_rate_limit_is_a_diagnostic_not_a_success() -> None:
@@ -169,6 +343,7 @@ def test_partial_provider_fallback_runs_normalize_deduplicate_rank_result() -> N
     assert result.papers[0].doi == "10.1000/acoustic"
     assert result.papers[0].providers == ["openalex", "crossref"]
     assert result.papers[0].score > 0
+    assert result.papers[0].acoustic_relevance > 0
     assert result.provider_results[1].status == "timeout"
     assert result.provider_results[0].fetched_count == 1
     assert result.provider_results[2].fetched_count == 1

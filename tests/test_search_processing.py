@@ -224,3 +224,23 @@ def test_recency_breaks_a_relevance_tie_deterministically() -> None:
     )
     assert [item.year for item in ranked] == [2026, 2016]
     assert ranked[0].score > ranked[1].score
+
+
+def test_journal_mode_sorts_acoustic_relevance_before_query_overlap() -> None:
+    weak = paper("Acoustic sensing", provider_id="weak", year=2026).model_copy(
+        update={"acoustic_relevance": 0.25, "is_priority_journal": True}
+    )
+    strong = paper(
+        "Underwater sonar beamforming",
+        provider_id="strong",
+        year=2020,
+    ).model_copy(update={"acoustic_relevance": 0.9})
+
+    ranked = search.rank_papers(
+        "acoustic sensing",
+        [weak, strong],
+        current_year=2026,
+        journal_mode=True,
+    )
+
+    assert [item.provider_id for item in ranked] == ["strong", "weak"]
