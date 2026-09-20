@@ -6,7 +6,7 @@ import httpx
 
 from litwatch.core import Paper
 from litwatch.core.identity import normalize_arxiv_id, normalize_doi
-from litwatch.providers.base import HttpProvider
+from litwatch.providers.base import HttpProvider, ProviderSearchCriteria
 
 
 def _abstract_from_index(value: object) -> str:
@@ -75,8 +75,30 @@ class OpenAlexProvider(HttpProvider):
         self.email = email.strip()
         self.endpoint = endpoint or self.endpoint
 
-    def search(self, topic: str, limit: int) -> list[Paper]:
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        criteria: ProviderSearchCriteria | None = None,
+    ) -> list[Paper]:
         params: dict[str, str | int] = {"search": topic, "per-page": min(limit, 200)}
+        filters: list[str] = []
+        if criteria is not None:
+            if criteria.year_from is not None:
+                filters.append(f"from_publication_date:{criteria.year_from}-01-01")
+            if criteria.year_to is not None:
+                filters.append(f"to_publication_date:{criteria.year_to}-12-31")
+            source_ids = [
+                source_id
+                for journal in criteria.journals
+                for provider, source_id in journal.provider_source_ids
+                if provider.casefold() == "openalex"
+            ]
+            if source_ids:
+                filters.append(f"primary_location.source.id:{'|'.join(source_ids)}")
+        if filters:
+            params["filter"] = ",".join(filters)
         if self.email:
             params["mailto"] = self.email
         response = self._get(self.endpoint, params=params)

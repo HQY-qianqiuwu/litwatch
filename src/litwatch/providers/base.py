@@ -1,16 +1,31 @@
 """Common search interface and bounded HTTP transport for source adapters."""
 
+from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 
 from litwatch.core import Paper
+from litwatch.journals import JournalDefinition
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSearchCriteria:
+    journals: tuple[JournalDefinition, ...] = ()
+    year_from: int | None = None
+    year_to: int | None = None
 
 
 class LiteratureProvider(Protocol):
     name: str
 
-    def search(self, topic: str, limit: int) -> list[Paper]: ...
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        criteria: ProviderSearchCriteria | None = None,
+    ) -> list[Paper]: ...
 
 
 class HttpProvider:

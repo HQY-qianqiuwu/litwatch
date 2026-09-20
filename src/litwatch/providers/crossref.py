@@ -8,7 +8,7 @@ import httpx
 
 from litwatch.core import Paper
 from litwatch.core.identity import normalize_doi, normalized_title
-from litwatch.providers.base import HttpProvider
+from litwatch.providers.base import HttpProvider, ProviderSearchCriteria
 
 
 def _first_text(value: object) -> str:
@@ -92,8 +92,22 @@ class CrossrefProvider(HttpProvider):
         self.email = email.strip()
         self.endpoint = endpoint or self.endpoint
 
-    def search(self, topic: str, limit: int) -> list[Paper]:
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        criteria: ProviderSearchCriteria | None = None,
+    ) -> list[Paper]:
         params: dict[str, str | int] = {"query.bibliographic": topic, "rows": min(limit, 100)}
+        filters: list[str] = []
+        if criteria is not None:
+            if criteria.year_from is not None:
+                filters.append(f"from-pub-date:{criteria.year_from}-01-01")
+            if criteria.year_to is not None:
+                filters.append(f"until-pub-date:{criteria.year_to}-12-31")
+        if filters:
+            params["filter"] = ",".join(filters)
         if self.email:
             params["mailto"] = self.email
         identity = (

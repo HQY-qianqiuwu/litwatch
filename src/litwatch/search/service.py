@@ -1,13 +1,15 @@
 """The sole provider-search orchestration entry for API and future callers."""
 
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from json import JSONDecodeError
 
 import httpx
 from pydantic import ValidationError
 
 from litwatch.core import Paper, ProviderResult, ProviderState, SearchResult, SearchStatus
-from litwatch.providers.base import LiteratureProvider
+from litwatch.journals import JOURNAL_REGISTRY
+from litwatch.providers.base import LiteratureProvider, ProviderSearchCriteria
 from litwatch.search.deduplication import deduplicate_papers
 from litwatch.search.ranking import rank_papers
 
@@ -37,19 +39,51 @@ class SearchService:
             raise ValueError("at least one literature provider is required")
         self.providers = providers
 
-    def search(self, topic: str, limit: int) -> SearchResult:
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        journals: Sequence[str] | None = None,
+        year_from: int | None = None,
+        year_to: int | None = None,
+    ) -> SearchResult:
         query = topic.strip()
         if not query:
             raise ValueError("topic must not be blank")
         if isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be a positive integer")
+        requested_journals = []
+        for value in journals or ():
+            journal = JOURNAL_REGISTRY.resolve_requested(value)
+            if journal is None:
+                raise ValueError(f"unknown journal: {value}")
+            if journal not in requested_journals:
+                requested_journals.append(journal)
+        if year_from is not None and year_to is not None and year_from > year_to:
+            raise ValueError("year_from must not be greater than year_to")
+
+        criteria = ProviderSearchCriteria(
+            journals=tuple(requested_journals),
+            year_from=year_from,
+            year_to=year_to,
+        )
+        filtered = bool(requested_journals or year_from is not None or year_to is not None)
 
         candidates: list[Paper] = []
         statuses: list[ProviderResult] = []
-        candidate_limit = min(max(limit * 3, limit), 100)
+        candidate_limit = (
+            min(max(limit * 10, 100), 200)
+            if filtered
+            else min(max(limit * 3, limit), 100)
+        )
         for provider in self.providers:
             try:
-                records = provider.search(query, candidate_limit)
+                records = (
+                    provider.search(query, candidate_limit, criteria=criteria)
+                    if filtered
+                    else provider.search(query, candidate_limit)
+                )
                 if not isinstance(records, list) or any(
                     not isinstance(record, Paper) for record in records
                 ):

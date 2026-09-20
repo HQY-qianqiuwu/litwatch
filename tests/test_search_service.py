@@ -6,6 +6,7 @@ import pytest
 from litwatch import search
 from litwatch.core import Paper
 from litwatch.providers import ArxivProvider, CrossrefProvider, OpenAlexProvider
+from litwatch.providers.base import ProviderSearchCriteria
 
 
 class FakeProvider:
@@ -13,10 +14,16 @@ class FakeProvider:
         self.name = name
         self.records = records if records is not None else []
         self.error = error
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[str, int, ProviderSearchCriteria | None]] = []
 
-    def search(self, topic: str, limit: int) -> list[Paper]:
-        self.calls.append((topic, limit))
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        criteria: ProviderSearchCriteria | None = None,
+    ) -> list[Paper]:
+        self.calls.append((topic, limit, criteria))
         if self.error:
             raise self.error
         return self.records
@@ -66,6 +73,37 @@ def test_four_search_statuses_and_one_call_per_provider(
     assert first.calls[0][1] >= 5
     if second_error and isinstance(second_error, httpx.TimeoutException):
         assert result.provider_results[1].status == "timeout"
+
+
+def test_journal_search_overfetches_then_applies_the_final_limit() -> None:
+    records = [
+        Paper(
+            title=f"Acoustic localization study {index}",
+            year=2026 - index,
+            doi=f"10.1000/acoustic-{index}",
+            provider_id=f"W{index}",
+            url=f"https://example.org/work/{index}",
+            source="openalex",
+            providers=["openalex"],
+        )
+        for index in range(8)
+    ]
+    provider = FakeProvider("openalex", records)
+
+    result = search.SearchService([provider]).search(
+        "acoustic localization",
+        2,
+        journals=["jasa"],
+        year_from=2020,
+        year_to=2026,
+    )
+
+    assert result.paper_count == 2
+    assert provider.calls[0][1] == 100
+    criteria = provider.calls[0][2]
+    assert criteria is not None
+    assert [journal.journal_id for journal in criteria.journals] == ["jasa"]
+    assert (criteria.year_from, criteria.year_to) == (2020, 2026)
 
 
 def test_provider_rate_limit_is_a_diagnostic_not_a_success() -> None:

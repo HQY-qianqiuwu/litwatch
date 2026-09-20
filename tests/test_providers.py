@@ -3,6 +3,7 @@
 import httpx
 
 from litwatch import providers
+from litwatch.providers.base import ProviderSearchCriteria
 
 
 def test_openalex_normalizes_work_metadata() -> None:
@@ -138,3 +139,41 @@ def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
     assert records[0].journal == "Ocean Engineering"
     assert records[0].journal_issns == ["0029-8018", "1873-5258"]
     assert records[0].journal_source_ids == {}
+
+
+def test_providers_apply_safe_year_hints() -> None:
+    criteria = ProviderSearchCriteria(year_from=2020, year_to=2026)
+    seen: dict[str, str] = {}
+
+    def openalex_reply(request: httpx.Request) -> httpx.Response:
+        seen["openalex"] = request.url.params["filter"]
+        return httpx.Response(200, json={"results": []})
+
+    def crossref_reply(request: httpx.Request) -> httpx.Response:
+        seen["crossref"] = request.url.params["filter"]
+        return httpx.Response(200, json={"message": {"items": []}})
+
+    def arxiv_reply(request: httpx.Request) -> httpx.Response:
+        seen["arxiv"] = request.url.params["search_query"]
+        return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>')
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(openalex_reply)) as openalex_client,
+        httpx.Client(transport=httpx.MockTransport(crossref_reply)) as crossref_client,
+        httpx.Client(transport=httpx.MockTransport(arxiv_reply)) as arxiv_client,
+    ):
+        providers.OpenAlexProvider(client=openalex_client).search(
+            "acoustic", 5, criteria=criteria
+        )
+        providers.CrossrefProvider(client=crossref_client).search(
+            "acoustic", 5, criteria=criteria
+        )
+        providers.ArxivProvider(client=arxiv_client).search(
+            "acoustic", 5, criteria=criteria
+        )
+
+    assert seen["openalex"] == (
+        "from_publication_date:2020-01-01,to_publication_date:2026-12-31"
+    )
+    assert seen["crossref"] == "from-pub-date:2020-01-01,until-pub-date:2026-12-31"
+    assert "submittedDate:[202001010000 TO 202612312359]" in seen["arxiv"]

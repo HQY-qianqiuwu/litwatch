@@ -7,7 +7,7 @@ import httpx
 
 from litwatch.core import Paper
 from litwatch.core.identity import normalize_arxiv_id, normalize_doi
-from litwatch.providers.base import HttpProvider
+from litwatch.providers.base import HttpProvider, ProviderSearchCriteria
 
 ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
@@ -58,9 +58,21 @@ class ArxivProvider(HttpProvider):
         super().__init__(client=client, timeout=timeout)
         self.endpoint = endpoint or self.endpoint
 
-    def search(self, topic: str, limit: int) -> list[Paper]:
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        criteria: ProviderSearchCriteria | None = None,
+    ) -> list[Paper]:
         terms = re.findall(r"\w+", topic.casefold())[:6]
         query = " OR ".join(f"all:{term}" for term in terms) or f'all:"{topic}"'
+        if criteria is not None and (
+            criteria.year_from is not None or criteria.year_to is not None
+        ):
+            first = criteria.year_from or 0
+            last = criteria.year_to or 9999
+            query = f"({query}) AND submittedDate:[{first:04d}01010000 TO {last:04d}12312359]"
         response = self._get(
             self.endpoint,
             params={
