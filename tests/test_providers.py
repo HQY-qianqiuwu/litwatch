@@ -94,6 +94,8 @@ def test_arxiv_normalizes_atom_entry() -> None:
     assert records[0].source == "arxiv"
     assert records[0].provider_id == "2401.12345"
     assert records[0].journal == "IEEE Journal of Oceanic Engineering 49 (2024)"
+    assert records[0].journal_reference == "IEEE Journal of Oceanic Engineering 49 (2024)"
+    assert records[0].journal_id == "ieee_joe"
     assert records[0].journal_issns == []
     assert records[0].journal_source_ids == {}
 

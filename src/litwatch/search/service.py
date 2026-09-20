@@ -120,6 +120,8 @@ class SearchService:
                     internal_id=paper.journal_id,
                     name=paper.journal,
                 )
+                if journal is None and paper.journal:
+                    journal = JOURNAL_REGISTRY.resolve_reference(paper.journal)
                 if journal is not None:
                     paper = paper.model_copy(
                         update={

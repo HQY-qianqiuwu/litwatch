@@ -26,6 +26,7 @@ class Paper(BaseModel):
     aliases: list[ProviderAlias] = Field(default_factory=list)
     score: float = 0.0
     journal: str | None = None
+    journal_reference: str | None = None
     journal_id: str | None = None
     journal_issns: list[str] = Field(default_factory=list)
     journal_source_ids: dict[str, str] = Field(default_factory=dict)

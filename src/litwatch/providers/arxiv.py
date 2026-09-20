@@ -7,6 +7,7 @@ import httpx
 
 from litwatch.core import Paper
 from litwatch.core.identity import normalize_arxiv_id, normalize_doi
+from litwatch.journals import JOURNAL_REGISTRY
 from litwatch.providers.base import HttpProvider, ProviderSearchCriteria
 
 ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
@@ -25,6 +26,8 @@ def normalize_entry(entry: ET.Element) -> Paper | None:
     if not identifier:
         raise ValueError("arXiv entry has no article id")
     published = _text(entry, "atom:published")
+    journal_reference = _text(entry, "arxiv:journal_ref")
+    journal = JOURNAL_REGISTRY.resolve_reference(journal_reference)
     return Paper(
         title=title,
         authors=[
@@ -40,7 +43,9 @@ def normalize_entry(entry: ET.Element) -> Paper | None:
         url=f"https://arxiv.org/abs/{identifier}",
         source="arxiv",
         providers=["arxiv"],
-        journal=_text(entry, "arxiv:journal_ref") or None,
+        journal=journal_reference or None,
+        journal_reference=journal_reference or None,
+        journal_id=journal.journal_id if journal is not None else None,
     )
 
 

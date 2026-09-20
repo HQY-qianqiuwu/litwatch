@@ -280,6 +280,46 @@ def test_acoustic_relevance_outranks_priority_bonus_in_journal_mode() -> None:
     assert result.papers[0].acoustic_relevance > result.papers[1].acoustic_relevance
 
 
+def test_chinese_acoustic_paper_passes_verified_chinese_journal_filter() -> None:
+    candidate = paper(
+        "水下声源定位与声呐目标检测",
+        doi="10.1000/chinese-acoustics",
+        provider_id="W-acta",
+        journal="声学学报",
+        journal_issns=["0371-0025"],
+    )
+
+    result = search.SearchService([FakeProvider("openalex", [candidate])]).search(
+        "水下声源定位",
+        5,
+        journals=["acta_acustica_cn"],
+    )
+
+    assert result.status == "success"
+    assert result.paper_count == 1
+    assert result.papers[0].journal_id == "acta_acustica_cn"
+    assert result.papers[0].acoustic_relevance > 0
+
+
+def test_arxiv_only_standard_journal_reference_passes_exact_journal_filter() -> None:
+    candidate = paper(
+        "Underwater acoustic source localization with sonar",
+        doi="10.1000/arxiv-joe",
+        source="arxiv",
+        provider_id="2401.12345",
+        journal="IEEE Journal of Oceanic Engineering 49 (2024)",
+    )
+
+    result = search.SearchService([FakeProvider("arxiv", [candidate])]).search(
+        "underwater acoustic localization",
+        5,
+        journals=["ieee_joe"],
+    )
+
+    assert result.paper_count == 1
+    assert result.papers[0].journal_id == "ieee_joe"
+
+
 def test_provider_rate_limit_is_a_diagnostic_not_a_success() -> None:
     service_type = getattr(search, "SearchService", None)
     assert service_type is not None

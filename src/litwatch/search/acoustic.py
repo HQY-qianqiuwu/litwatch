@@ -1,6 +1,7 @@
 """Deterministic acoustic-topic relevance scoring."""
 
 import re
+import unicodedata
 
 from litwatch.core import Paper
 
@@ -16,25 +17,46 @@ _PHRASE_WEIGHTS: tuple[tuple[str, float], ...] = (
     ("acoustic propagation", 0.30),
     ("passive acoustics", 0.30),
     ("hydrophone", 0.30),
+    ("hydrophones", 0.30),
     ("sonar", 0.28),
     ("acoustic sensing", 0.25),
     ("array signal processing", 0.22),
     ("tdoa", 0.20),
     ("beamforming", 0.18),
     ("acoustic", 0.08),
+    ("水下声学", 0.35),
+    ("海洋声学", 0.35),
+    ("声源定位", 0.35),
+    ("时差定位", 0.30),
+    ("阵列信号处理", 0.30),
+    ("声传播", 0.30),
+    ("水声通信", 0.35),
+    ("声学传感", 0.25),
+    ("声呐", 0.30),
+    ("目标检测", 0.25),
+    ("波束形成", 0.30),
+    ("水听器", 0.30),
+    ("被动声学", 0.30),
 )
 
 
 def _normalized_text(value: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join(re.findall(r"\w+", normalized, flags=re.UNICODE))
 
 
 def _evidence_score(value: str) -> float:
-    padded = f" {_normalized_text(value)} "
+    normalized = _normalized_text(value)
+    padded = f" {normalized} "
+    compact = normalized.replace(" ", "")
     return sum(
         weight
         for phrase, weight in _PHRASE_WEIGHTS
-        if f" {phrase} " in padded
+        if (
+            phrase in compact
+            if any(ord(character) > 127 for character in phrase)
+            else f" {phrase} " in padded
+        )
     )
 
 

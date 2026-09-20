@@ -75,3 +75,29 @@ def test_identity_normalizes_issn_and_provider_source_url() -> None:
         ).journal_id
         == "nature_communications"
     )
+
+
+def test_chinese_acta_requires_disambiguating_identity_evidence() -> None:
+    assert JOURNAL_REGISTRY.resolve_requested("Acta Acustica").journal_id == (
+        "acta_acustica_cn"
+    )
+    assert JOURNAL_REGISTRY.resolve_identity(issns=["0371-0025"]).journal_id == (
+        "acta_acustica_cn"
+    )
+    assert (
+        JOURNAL_REGISTRY.resolve_identity(
+            issns=["2681-4617"],
+            name="Acta Acustica",
+        )
+        is None
+    )
+
+
+def test_supported_bibliographic_suffix_resolves_without_fuzzy_substrings() -> None:
+    resolved = JOURNAL_REGISTRY.resolve_reference(
+        "IEEE Journal of Oceanic Engineering 49 (2024)"
+    )
+
+    assert resolved is not None
+    assert resolved.journal_id == "ieee_joe"
+    assert JOURNAL_REGISTRY.resolve_reference("Article about IEEE Journal of Oceanic Engineering") is None

@@ -33,6 +33,7 @@ class JournalDefinition:
     canonical_name: str
     abbreviation: str
     aliases: tuple[str, ...] = ()
+    identity_aliases: tuple[str, ...] = ()
     issns: tuple[str, ...] = ()
     provider_source_ids: tuple[tuple[str, str], ...] = ()
     priority: float = 0.0
@@ -44,7 +45,8 @@ class JournalRegistry:
     def __init__(self, journals: Iterable[JournalDefinition]) -> None:
         self._journals = tuple(journals)
         self._by_id = {journal.journal_id: journal for journal in self._journals}
-        self._by_name: dict[str, JournalDefinition] = {}
+        self._by_request_name: dict[str, JournalDefinition] = {}
+        self._by_identity_name: dict[str, JournalDefinition] = {}
         self._by_issn: dict[str, JournalDefinition] = {}
         self._by_provider_source: dict[tuple[str, str], JournalDefinition] = {}
 
@@ -55,7 +57,13 @@ class JournalRegistry:
                 journal.abbreviation,
                 *journal.aliases,
             ):
-                self._by_name[_normalize_name(value)] = journal
+                self._by_request_name[_normalize_name(value)] = journal
+            for value in (
+                journal.canonical_name,
+                journal.abbreviation,
+                *journal.identity_aliases,
+            ):
+                self._by_identity_name[_normalize_name(value)] = journal
             for issn in journal.issns:
                 self._by_issn[_normalize_issn(issn)] = journal
             for provider, source_id in journal.provider_source_ids:
@@ -69,7 +77,30 @@ class JournalRegistry:
         return self._by_id.get(journal_id)
 
     def resolve_requested(self, value: str) -> JournalDefinition | None:
-        return self._by_name.get(_normalize_name(value))
+        return self._by_request_name.get(_normalize_name(value))
+
+    def resolve_reference(self, value: str) -> JournalDefinition | None:
+        """Resolve an exact journal name followed by a conservative citation suffix."""
+        reference = value.strip()
+        for journal in self._journals:
+            names = (
+                journal.canonical_name,
+                journal.abbreviation,
+                *journal.identity_aliases,
+            )
+            for name in names:
+                if not reference.casefold().startswith(name.casefold()):
+                    continue
+                suffix = reference[len(name) :].strip()
+                if not suffix:
+                    return journal
+                if re.fullmatch(
+                    r"(?:[,;]\s*)?(?:(?:vol(?:ume)?\.?|no\.?)\s*)?\d+.*",
+                    suffix,
+                    flags=re.IGNORECASE,
+                ):
+                    return journal
+        return None
 
     def resolve_identity(
         self,
@@ -96,7 +127,7 @@ class JournalRegistry:
                 return resolved
 
         if name:
-            return self._by_name.get(_normalize_name(name))
+            return self._by_identity_name.get(_normalize_name(name))
         return None
 
 
@@ -164,8 +195,9 @@ JOURNAL_REGISTRY = JournalRegistry(
         JournalDefinition(
             journal_id="acta_acustica_cn",
             canonical_name="声学学报",
-            abbreviation="Acta Acustica",
-            aliases=("Acta Acustica Sinica",),
+            abbreviation="Acta Acustica Sinica",
+            aliases=("Acta Acustica",),
+            issns=("0371-0025",),
             provider_source_ids=(("openalex", "S4306546527"),),
             priority=0.8,
         ),

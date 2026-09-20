@@ -57,3 +57,15 @@ def test_single_generic_acoustic_word_is_not_enough_for_hard_filter() -> None:
     score = score_acoustic_relevance(paper("Acoustic properties of a concert hall"))
 
     assert 0.0 < score < ACOUSTIC_HARD_FILTER_THRESHOLD
+
+
+def test_chinese_acoustic_phrases_pass_the_hard_filter() -> None:
+    score = score_acoustic_relevance(paper("水下声源定位与声呐目标检测"))
+
+    assert score >= ACOUSTIC_HARD_FILTER_THRESHOLD
+
+
+def test_explicit_hydrophone_plural_is_recognized() -> None:
+    score = score_acoustic_relevance(paper("Hydrophones for marine monitoring"))
+
+    assert score >= ACOUSTIC_HARD_FILTER_THRESHOLD

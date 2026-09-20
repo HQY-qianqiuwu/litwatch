@@ -244,3 +244,27 @@ def test_journal_mode_sorts_acoustic_relevance_before_query_overlap() -> None:
     )
 
     assert [item.provider_id for item in ranked] == ["strong", "weak"]
+
+
+def test_journal_mode_sorts_abstract_completeness_before_recency() -> None:
+    pending = paper(
+        "Underwater acoustic localization",
+        provider_id="pending-new",
+        abstract="",
+        year=2026,
+    ).model_copy(update={"acoustic_relevance": 0.7})
+    complete = paper(
+        "Underwater acoustic localization",
+        provider_id="complete-old",
+        abstract="Field measurements.",
+        year=2020,
+    ).model_copy(update={"acoustic_relevance": 0.7})
+
+    ranked = search.rank_papers(
+        "underwater acoustic localization",
+        [pending, complete],
+        current_year=2026,
+        journal_mode=True,
+    )
+
+    assert [item.provider_id for item in ranked] == ["complete-old", "pending-new"]

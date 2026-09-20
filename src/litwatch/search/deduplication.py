@@ -47,6 +47,7 @@ def _merge(records: list[Paper]) -> Paper:
         merged.year = merged.year if merged.year is not None else item.year
         merged.url = merged.url or item.url
         merged.journal = merged.journal or item.journal
+        merged.journal_reference = merged.journal_reference or item.journal_reference
         merged.journal_id = merged.journal_id or item.journal_id
         merged.journal_issns = list(
             dict.fromkeys([*merged.journal_issns, *item.journal_issns])

@@ -115,12 +115,41 @@ def test_repeat_search_enriches_legacy_record_with_phase45_metadata(tmp_path) ->
     assert enriched.paper_id == legacy.paper_id
     restarted = storage.SearchRepository(path).get_paper(legacy.paper_id)
     assert restarted.journal_id == "jasa"
-    assert restarted.journal_issns == ["0001-4966", "1520-8524"]
+    assert restarted.journal_issns == ["0001-4966", "1520-8524", "1520-9024"]
     assert restarted.journal_source_ids == {"openalex": "S11296630"}
     assert restarted.acoustic_relevance == 0.8
     assert restarted.is_priority_journal is True
     assert restarted.abstract_status == "complete"
     assert restarted.analysis_eligible is True
+
+
+def test_new_reliable_journal_identifier_replaces_stale_name_identity(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    first = repository.save(
+        _result(
+            _paper(
+                journal="Nature",
+                journal_id="nature",
+                journal_issns=["0028-0836"],
+            )
+        )
+    ).papers[0]
+
+    second = repository.save(
+        _result(
+            _paper(
+                journal="The Journal of the Acoustical Society of America",
+                journal_id="jasa",
+                journal_issns=["0001-4966"],
+                journal_source_ids={"openalex": "S11296630"},
+            )
+        )
+    ).papers[0]
+
+    assert second.paper_id == first.paper_id
+    assert second.journal_id == "jasa"
+    assert second.journal == "The Journal of the Acoustical Society of America"
 
 
 def test_each_empty_search_has_its_own_persisted_scan(tmp_path) -> None:
