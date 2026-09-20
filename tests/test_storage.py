@@ -1,5 +1,6 @@
 """SQLite scans remain available across repository instances."""
 
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
@@ -55,6 +56,71 @@ def test_scan_and_paper_survive_repository_restart(tmp_path) -> None:
     assert loaded.provider_results[0].status == ProviderState.SUCCESS
     assert loaded.papers[0].paper_id == saved.papers[0].paper_id
     assert restarted.get_paper(saved.papers[0].paper_id).title == saved.papers[0].title
+
+
+def test_legacy_payload_without_phase45_fields_derives_safe_pending_state(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    saved = repository.save(_result(_paper(abstract="")))
+    paper_id = saved.papers[0].paper_id
+
+    with sqlite3.connect(path) as connection:
+        payload = json.loads(
+            connection.execute(
+                "SELECT payload FROM papers WHERE paper_id = ?", (paper_id,)
+            ).fetchone()[0]
+        )
+        for field in (
+            "journal",
+            "journal_id",
+            "journal_issns",
+            "journal_source_ids",
+            "acoustic_relevance",
+            "is_priority_journal",
+            "abstract_status",
+            "analysis_eligible",
+        ):
+            payload.pop(field, None)
+        connection.execute(
+            "UPDATE papers SET payload = ? WHERE paper_id = ?",
+            (json.dumps(payload), paper_id),
+        )
+
+    loaded = storage.SearchRepository(path).get_paper(paper_id)
+    assert loaded.abstract_status == "pending"
+    assert loaded.analysis_eligible is False
+    assert loaded.journal_id is None
+    assert loaded.journal_issns == []
+
+
+def test_repeat_search_enriches_legacy_record_with_phase45_metadata(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    repository = storage.SearchRepository(path)
+    legacy = repository.save(_result(_paper(abstract=""))).papers[0]
+
+    enriched = repository.save(
+        _result(
+            _paper(
+                abstract="Underwater acoustic propagation measurements.",
+                journal="The Journal of the Acoustical Society of America",
+                journal_id="jasa",
+                journal_issns=["0001-4966", "1520-8524"],
+                journal_source_ids={"openalex": "S11296630"},
+                acoustic_relevance=0.8,
+                is_priority_journal=True,
+            )
+        )
+    ).papers[0]
+
+    assert enriched.paper_id == legacy.paper_id
+    restarted = storage.SearchRepository(path).get_paper(legacy.paper_id)
+    assert restarted.journal_id == "jasa"
+    assert restarted.journal_issns == ["0001-4966", "1520-8524"]
+    assert restarted.journal_source_ids == {"openalex": "S11296630"}
+    assert restarted.acoustic_relevance == 0.8
+    assert restarted.is_priority_journal is True
+    assert restarted.abstract_status == "complete"
+    assert restarted.analysis_eligible is True
 
 
 def test_each_empty_search_has_its_own_persisted_scan(tmp_path) -> None:

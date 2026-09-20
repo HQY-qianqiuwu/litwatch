@@ -93,4 +93,20 @@ def enrich(existing: Paper, incoming: Paper) -> Paper:
     updated.arxiv_id = existing.arxiv_id or incoming.arxiv_id
     updated.url = existing.url or incoming.url
     updated.score = max(existing.score, incoming.score)
+    updated.journal = existing.journal or incoming.journal
+    updated.journal_id = existing.journal_id or incoming.journal_id
+    updated.journal_issns = list(
+        dict.fromkeys([*existing.journal_issns, *incoming.journal_issns])
+    )
+    updated.journal_source_ids = {
+        **incoming.journal_source_ids,
+        **existing.journal_source_ids,
+    }
+    updated.acoustic_relevance = max(
+        existing.acoustic_relevance,
+        incoming.acoustic_relevance,
+    )
+    updated.is_priority_journal = (
+        existing.is_priority_journal or incoming.is_priority_journal
+    )
     return updated
