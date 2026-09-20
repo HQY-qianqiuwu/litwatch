@@ -15,6 +15,7 @@ from litwatch.analysis import (
     OpenAICompatibleGateway,
     PaperAnalysis,
     PaperAnalysisService,
+    PaperAnalysisUnavailableError,
     PaperNotFoundError,
 )
 from litwatch.core import ProviderState, SearchResult, SearchStatus
@@ -139,6 +140,11 @@ def create_app(
             )
         except PaperNotFoundError:
             raise HTTPException(status_code=404, detail="paper not found") from None
+        except PaperAnalysisUnavailableError:
+            raise HTTPException(
+                status_code=409,
+                detail="paper abstract is unavailable",
+            ) from None
         except InvalidBaseUrlError:
             raise HTTPException(status_code=422, detail="invalid LLM base URL") from None
         except GatewayTimeoutError:

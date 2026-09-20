@@ -63,7 +63,7 @@ def llm_payload() -> dict[str, object]:
     return {"choices": [{"message": {"content": json.dumps(result)}}]}
 
 
-def saved_paper(repository: SearchRepository) -> Paper:
+def saved_paper(repository: SearchRepository, *, abstract: str = "A TDOA study.") -> Paper:
     return repository.save(
         SearchResult(
             topic="acoustic",
@@ -71,7 +71,7 @@ def saved_paper(repository: SearchRepository) -> Paper:
             papers=[
                 Paper(
                     title="Underwater Acoustic Localization",
-                    abstract="A TDOA study.",
+                    abstract=abstract,
                     doi="10.1000/acoustic",
                     provider_id="W123",
                     url="https://example.org/paper",
@@ -83,10 +83,10 @@ def saved_paper(repository: SearchRepository) -> Paper:
     ).papers[0]
 
 
-def make_app(tmp_path, responder, *, resolver=public_resolver):
+def make_app(tmp_path, responder, *, resolver=public_resolver, abstract="A TDOA study."):
     path = tmp_path / "litwatch.sqlite3"
     papers = SearchRepository(path)
-    paper = saved_paper(papers)
+    paper = saved_paper(papers, abstract=abstract)
     client = httpx.Client(transport=httpx.MockTransport(responder), follow_redirects=False)
     gateway = OpenAICompatibleGateway(client=client, resolver=resolver)
     service = PaperAnalysisService(papers, AnalysisRepository(path), gateway)
@@ -196,6 +196,36 @@ def test_analyze_missing_paper_is_404_without_llm_request(tmp_path) -> None:
     finally:
         client.close()
     assert response.status_code == 404
+    assert calls == 0
+
+
+def test_analyze_pending_paper_is_409_without_llm_or_search(tmp_path) -> None:
+    calls = 0
+
+    def responder(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=llm_payload())
+
+    application, _path, paper, client = make_app(tmp_path, responder, abstract="   ")
+    try:
+        response = asgi_request(
+            application,
+            "POST",
+            "/api/v1/literature/analyze",
+            payload={
+                "paper_id": paper.paper_id,
+                "analysis_mode": "quick_scan",
+                "base_url": "https://llm.example.test/v1",
+                "model": "example-model",
+            },
+            headers={"X-LitWatch-LLM-Key": "secret-test-key"},
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "paper abstract is unavailable"
     assert calls == 0
 
 

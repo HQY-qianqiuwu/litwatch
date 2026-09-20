@@ -9,7 +9,11 @@ from litwatch.analysis.gateway import (
     validate_base_url,
 )
 from litwatch.analysis.models import PaperAnalysis, QuickScan
-from litwatch.analysis.service import PaperAnalysisService, PaperNotFoundError
+from litwatch.analysis.service import (
+    PaperAnalysisService,
+    PaperAnalysisUnavailableError,
+    PaperNotFoundError,
+)
 
 __all__ = [
     "GatewayResponseError",
@@ -19,6 +23,7 @@ __all__ = [
     "OpenAICompatibleGateway",
     "PaperAnalysis",
     "PaperAnalysisService",
+    "PaperAnalysisUnavailableError",
     "PaperNotFoundError",
     "QuickScan",
     "validate_base_url",

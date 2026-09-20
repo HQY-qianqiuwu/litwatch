@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from litwatch.analysis import PaperAnalysisService, PaperNotFoundError, QuickScan
+from litwatch.analysis import (
+    PaperAnalysisService,
+    PaperAnalysisUnavailableError,
+    PaperNotFoundError,
+    QuickScan,
+)
 from litwatch.core import Paper, SearchResult, SearchStatus
 from litwatch.storage import AnalysisRepository, SearchRepository
 
@@ -120,6 +125,43 @@ def test_missing_paper_fails_before_gateway_call(tmp_path) -> None:
     assert gateway.calls == []
 
 
+def test_pending_paper_fails_before_gateway_call(tmp_path) -> None:
+    path = tmp_path / "litwatch.sqlite3"
+    papers = SearchRepository(path)
+    pending = papers.save(
+        SearchResult(
+            topic="underwater acoustic metadata",
+            status=SearchStatus.SUCCESS,
+            papers=[
+                Paper(
+                    title="Metadata-only underwater acoustic paper",
+                    abstract="",
+                    doi="10.1000/pending",
+                    provider_id="W-pending",
+                    url="https://example.org/pending",
+                    source="openalex",
+                    providers=["openalex"],
+                )
+            ],
+        )
+    ).papers[0]
+    gateway = RecordingGateway()
+    service = PaperAnalysisService(papers, AnalysisRepository(path), gateway)
+
+    with pytest.raises(PaperAnalysisUnavailableError):
+        service.analyze(
+            paper_id=pending.paper_id,
+            analysis_mode="quick_scan",
+            base_url="https://llm.example.test/v1",
+            model="example-model",
+            api_key="secret-test-key",
+        )
+
+    assert gateway.calls == []
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM analyses").fetchone()[0] == 0
+
+
 def test_analysis_follows_paper_when_late_identity_bridge_reconciles(tmp_path) -> None:
     path = tmp_path / "litwatch.sqlite3"
     papers = SearchRepository(path)
@@ -135,7 +177,8 @@ def test_analysis_follows_paper_when_late_identity_bridge_reconciles(tmp_path) -
         SearchResult(
             topic="doi",
             status=SearchStatus.SUCCESS,
-            papers=[Paper(title="DOI metadata", doi="10.1000/bridge", provider_id="C123",
+            papers=[Paper(title="DOI metadata", abstract="Persisted abstract.",
+                          doi="10.1000/bridge", provider_id="C123",
                           url="https://doi.org/10.1000/bridge", source="crossref",
                           providers=["crossref"])],
         )
