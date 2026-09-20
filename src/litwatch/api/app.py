@@ -26,6 +26,9 @@ from litwatch.storage import AnalysisRepository, SearchRepository
 class SearchRequest(BaseModel):
     topic: str
     limit: int = Field(default=5, ge=1, le=50)
+    journals: list[str] = Field(default_factory=list)
+    year_from: int | None = Field(default=None, ge=1000, le=9999)
+    year_to: int | None = Field(default=None, ge=1000, le=9999)
 
     @field_validator("topic")
     @classmethod
@@ -97,7 +100,17 @@ def create_app(
 
     @application.post("/api/v1/literature/search", response_model=SearchResult)
     def search_literature(request: SearchRequest) -> SearchResult | JSONResponse:
-        result = repository.save(search_service.search(request.topic, request.limit))
+        try:
+            search_result = search_service.search(
+                request.topic,
+                request.limit,
+                journals=request.journals,
+                year_from=request.year_from,
+                year_to=request.year_to,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        result = repository.save(search_result)
         if result.status is SearchStatus.ALL_PROVIDERS_FAILED:
             all_timeouts = all(
                 item.status is ProviderState.TIMEOUT for item in result.provider_results
