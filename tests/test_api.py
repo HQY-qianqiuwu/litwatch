@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from litwatch import api
 from litwatch.core import Paper
+from litwatch.providers.base import ProviderSearchCriteria
 from litwatch.search import SearchService
 from litwatch.storage import SearchRepository
 
@@ -30,19 +31,30 @@ class CountingProvider:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.calls = 0
+        self.last_criteria: ProviderSearchCriteria | None = None
 
-    def search(self, topic: str, limit: int) -> list[Paper]:
+    def search(
+        self,
+        topic: str,
+        limit: int,
+        *,
+        criteria: ProviderSearchCriteria | None = None,
+    ) -> list[Paper]:
         self.calls += 1
+        self.last_criteria = criteria
         if self.error:
             raise self.error
         return [
             Paper(
                 title="Underwater Acoustic TDOA Localization",
+                year=2026,
                 doi="10.1000/acoustic",
                 provider_id="W1",
                 url="https://example.org/work",
                 source=self.name,
                 providers=[self.name],
+                journal="The Journal of the Acoustical Society of America",
+                journal_issns=["0001-4966"],
             )
         ]
 
@@ -124,6 +136,68 @@ def test_invalid_search_request_is_rejected_before_search() -> None:
 
     assert response.status_code == 422
     assert provider.calls == 0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"topic": "underwater acoustics", "journals": ["unknown journal"]},
+        {"topic": "underwater acoustics", "year_from": 2026, "year_to": 2020},
+    ],
+)
+def test_invalid_search_criteria_return_422_without_provider_call(
+    payload: dict[str, object],
+) -> None:
+    provider = CountingProvider()
+
+    response = asgi_request(
+        api.create_app(SearchService([provider])),
+        "POST",
+        "/api/v1/literature/search",
+        payload,
+    )
+
+    assert response.status_code == 422
+    assert provider.calls == 0
+
+
+def test_filtered_search_forwards_criteria_and_persists_additive_metadata(tmp_path) -> None:
+    path = tmp_path / "filtered.sqlite3"
+    provider = CountingProvider()
+    application = api.create_app(
+        SearchService([provider]),
+        repository=SearchRepository(path),
+    )
+    payload = {
+        "topic": "underwater acoustic TDOA localization",
+        "journals": ["JASA"],
+        "year_from": 2020,
+        "year_to": 2026,
+        "limit": 5,
+    }
+
+    first = asgi_request(application, "POST", "/api/v1/literature/search", payload)
+    second = asgi_request(application, "POST", "/api/v1/literature/search", payload)
+
+    assert first.status_code == second.status_code == 200
+    body = first.json()
+    assert body["papers"][0]["journal_id"] == "jasa"
+    assert body["papers"][0]["journal"] == (
+        "The Journal of the Acoustical Society of America"
+    )
+    assert body["papers"][0]["acoustic_relevance"] > 0
+    assert body["papers"][0]["abstract_status"] == "pending"
+    assert body["papers"][0]["analysis_eligible"] is False
+    assert body["papers"][0]["paper_id"] == second.json()["papers"][0]["paper_id"]
+    assert provider.last_criteria is not None
+    assert [journal.journal_id for journal in provider.last_criteria.journals] == ["jasa"]
+    assert (provider.last_criteria.year_from, provider.last_criteria.year_to) == (
+        2020,
+        2026,
+    )
+    persisted = SearchRepository(path).get_paper(body["papers"][0]["paper_id"])
+    assert persisted.journal_id == "jasa"
+    assert persisted.analysis_eligible is False
 
 
 def test_api_search_returns_persistent_scan_and_stable_paper_id(tmp_path) -> None:

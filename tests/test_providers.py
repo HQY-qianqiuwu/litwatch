@@ -3,6 +3,7 @@
 import httpx
 
 from litwatch import providers
+from litwatch.providers.base import ProviderSearchCriteria
 
 
 def test_openalex_normalizes_work_metadata() -> None:
@@ -25,7 +26,17 @@ def test_openalex_normalizes_work_metadata() -> None:
                             {"author": {"display_name": "Ada Researcher"}, "author_position": "first"}
                         ],
                         "abstract_inverted_index": {"Underwater": [0], "acoustic": [1], "TDOA": [2]},
-                        "primary_location": {"landing_page_url": "https://example.org/work"},
+                        "primary_location": {
+                            "landing_page_url": "https://example.org/work",
+                            "source": {
+                                "id": "https://openalex.org/S11296630",
+                                "display_name": (
+                                    "The Journal of the Acoustical Society of America"
+                                ),
+                                "issn": ["0001-4966", "1520-8524"],
+                                "issn_l": "0001-4966",
+                            },
+                        },
                     }
                 ],
             },
@@ -43,6 +54,9 @@ def test_openalex_normalizes_work_metadata() -> None:
     assert records[0].provider_id == "W123"
     assert records[0].providers == ["openalex"]
     assert records[0].url == "https://example.org/work"
+    assert records[0].journal == "The Journal of the Acoustical Society of America"
+    assert records[0].journal_issns == ["0001-4966", "1520-8524"]
+    assert records[0].journal_source_ids == {"openalex": "S11296630"}
 
 
 def test_arxiv_normalizes_atom_entry() -> None:
@@ -58,6 +72,7 @@ def test_arxiv_normalizes_atom_entry() -> None:
         <published>2026-07-01T00:00:00Z</published>
         <author><name>Lin Researcher</name></author>
         <arxiv:doi>10.2000/ACOUSTIC</arxiv:doi>
+        <arxiv:journal_ref>IEEE Journal of Oceanic Engineering 49 (2024)</arxiv:journal_ref>
       </entry>
     </feed>"""
 
@@ -78,6 +93,11 @@ def test_arxiv_normalizes_atom_entry() -> None:
     assert records[0].year == 2026
     assert records[0].source == "arxiv"
     assert records[0].provider_id == "2401.12345"
+    assert records[0].journal == "IEEE Journal of Oceanic Engineering 49 (2024)"
+    assert records[0].journal_reference == "IEEE Journal of Oceanic Engineering 49 (2024)"
+    assert records[0].journal_id == "ieee_joe"
+    assert records[0].journal_issns == []
+    assert records[0].journal_source_ids == {}
 
 
 def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
@@ -99,6 +119,8 @@ def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
                             "author": [{"given": "Marie", "family": "Researcher"}],
                             "issued": {"date-parts": [[2025, 3, 1]]},
                             "URL": "https://doi.org/10.3000/ACOUSTIC",
+                            "container-title": ["Ocean Engineering"],
+                            "ISSN": ["0029-8018", "1873-5258"],
                         }
                     ]
                 },
@@ -116,3 +138,44 @@ def test_crossref_normalizes_work_metadata_and_strips_abstract_markup() -> None:
     assert records[0].year == 2025
     assert records[0].source == "crossref"
     assert records[0].provider_id == "10.3000/acoustic"
+    assert records[0].journal == "Ocean Engineering"
+    assert records[0].journal_issns == ["0029-8018", "1873-5258"]
+    assert records[0].journal_source_ids == {}
+
+
+def test_providers_apply_safe_year_hints() -> None:
+    criteria = ProviderSearchCriteria(year_from=2020, year_to=2026)
+    seen: dict[str, str] = {}
+
+    def openalex_reply(request: httpx.Request) -> httpx.Response:
+        seen["openalex"] = request.url.params["filter"]
+        return httpx.Response(200, json={"results": []})
+
+    def crossref_reply(request: httpx.Request) -> httpx.Response:
+        seen["crossref"] = request.url.params["filter"]
+        return httpx.Response(200, json={"message": {"items": []}})
+
+    def arxiv_reply(request: httpx.Request) -> httpx.Response:
+        seen["arxiv"] = request.url.params["search_query"]
+        return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"/>')
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(openalex_reply)) as openalex_client,
+        httpx.Client(transport=httpx.MockTransport(crossref_reply)) as crossref_client,
+        httpx.Client(transport=httpx.MockTransport(arxiv_reply)) as arxiv_client,
+    ):
+        providers.OpenAlexProvider(client=openalex_client).search(
+            "acoustic", 5, criteria=criteria
+        )
+        providers.CrossrefProvider(client=crossref_client).search(
+            "acoustic", 5, criteria=criteria
+        )
+        providers.ArxivProvider(client=arxiv_client).search(
+            "acoustic", 5, criteria=criteria
+        )
+
+    assert seen["openalex"] == (
+        "from_publication_date:2020-01-01,to_publication_date:2026-12-31"
+    )
+    assert seen["crossref"] == "from-pub-date:2020-01-01,until-pub-date:2026-12-31"
+    assert "submittedDate:[202001010000 TO 202612312359]" in seen["arxiv"]

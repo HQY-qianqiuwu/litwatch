@@ -10,28 +10,56 @@ def _tokens(value: str) -> set[str]:
     return set(re.findall(r"\w+", value.casefold()))
 
 
-def rank_papers(topic: str, papers: list[Paper], *, current_year: int | None = None) -> list[Paper]:
+def rank_papers(
+    topic: str,
+    papers: list[Paper],
+    *,
+    current_year: int | None = None,
+    journal_mode: bool = False,
+) -> list[Paper]:
     """Title overlap (70), abstract overlap (25), recency (up to 5)."""
     year = current_year if current_year is not None else datetime.now(UTC).year
     query_tokens = _tokens(topic)
-    scored: list[Paper] = []
+    scored: list[tuple[Paper, float, float]] = []
     for item in papers:
         title_overlap = len(query_tokens & _tokens(item.title)) / max(len(query_tokens), 1)
         abstract_overlap = len(query_tokens & _tokens(item.abstract)) / max(len(query_tokens), 1)
         age = max(0, year - item.year) if item.year is not None else None
         recency = 5 / (1 + age / 5) if age is not None else 0
-        scored.append(
-            item.model_copy(
-                update={"score": round(70 * title_overlap + 25 * abstract_overlap + recency, 2)}
+        relevance_score = 70 * title_overlap + 25 * abstract_overlap
+        paper = item.model_copy(
+            update={
+                "score": round(
+                    relevance_score
+                    + recency
+                    + (2 if item.is_priority_journal else 0),
+                    2,
+                )
+            }
+        )
+        scored.append((paper, relevance_score, recency))
+
+    if journal_mode:
+        scored.sort(
+            key=lambda pair: (
+                -pair[0].acoustic_relevance,
+                -pair[1],
+                -int(pair[0].analysis_eligible),
+                -int(pair[0].is_priority_journal),
+                -pair[2],
+                pair[0].title.casefold(),
+                pair[0].source,
+                pair[0].provider_id,
             )
         )
-    return sorted(
-        scored,
-        key=lambda item: (
-            -item.score,
-            -(item.year or 0),
-            item.title.casefold(),
-            item.source,
-            item.provider_id,
-        ),
-    )
+    else:
+        scored.sort(
+            key=lambda pair: (
+                -pair[0].score,
+                -(pair[0].year or 0),
+                pair[0].title.casefold(),
+                pair[0].source,
+                pair[0].provider_id,
+            )
+        )
+    return [paper for paper, _relevance, _recency in scored]

@@ -33,6 +33,10 @@ class PaperNotFoundError(LookupError):
     pass
 
 
+class PaperAnalysisUnavailableError(ValueError):
+    pass
+
+
 def _paper_text(paper: Paper) -> str:
     def value(item: object) -> str:
         if item is None or item == "" or item == []:
@@ -76,6 +80,8 @@ class PaperAnalysisService:
         paper = self.paper_reader.get_paper(paper_id)
         if paper is None:
             raise PaperNotFoundError("paper not found")
+        if not paper.analysis_eligible:
+            raise PaperAnalysisUnavailableError("paper abstract is unavailable")
         if analysis_mode != "quick_scan":
             raise ValueError("unsupported analysis mode")
         result = self.gateway.quick_scan(

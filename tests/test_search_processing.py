@@ -13,6 +13,9 @@ def paper(
     arxiv_id: str | None = None,
     abstract: str = "",
     year: int | None = None,
+    journal: str | None = None,
+    journal_issns: list[str] | None = None,
+    journal_source_ids: dict[str, str] | None = None,
 ) -> Paper:
     return Paper(
         title=title,
@@ -24,6 +27,9 @@ def paper(
         url="https://example.org/paper",
         source=source,
         providers=[source],
+        journal=journal,
+        journal_issns=journal_issns or [],
+        journal_source_ids=journal_source_ids or {},
     )
 
 
@@ -46,6 +52,32 @@ def test_same_doi_merges_records_and_preserves_both_sources() -> None:
     assert len(unique) == 1
     assert unique[0].providers == ["openalex", "crossref"]
     assert unique[0].abstract == "A useful abstract."
+
+
+def test_same_doi_merges_complementary_journal_metadata() -> None:
+    unique = search.deduplicate_papers(
+        [
+            paper(
+                "Underwater propagation",
+                doi="10.1234/journal-metadata",
+                journal="The Journal of the Acoustical Society of America",
+                journal_source_ids={"openalex": "S11296630"},
+            ),
+            paper(
+                "Underwater propagation",
+                source="crossref",
+                provider_id="10.1234/journal-metadata",
+                doi="10.1234/journal-metadata",
+                journal="JASA",
+                journal_issns=["0001-4966", "1520-8524"],
+            ),
+        ]
+    )
+
+    assert len(unique) == 1
+    assert unique[0].journal == "The Journal of the Acoustical Society of America"
+    assert unique[0].journal_issns == ["0001-4966", "1520-8524"]
+    assert unique[0].journal_source_ids == {"openalex": "S11296630"}
 
 
 def test_single_search_dedup_keeps_both_provider_identities() -> None:
@@ -192,3 +224,47 @@ def test_recency_breaks_a_relevance_tie_deterministically() -> None:
     )
     assert [item.year for item in ranked] == [2026, 2016]
     assert ranked[0].score > ranked[1].score
+
+
+def test_journal_mode_sorts_acoustic_relevance_before_query_overlap() -> None:
+    weak = paper("Acoustic sensing", provider_id="weak", year=2026).model_copy(
+        update={"acoustic_relevance": 0.25, "is_priority_journal": True}
+    )
+    strong = paper(
+        "Underwater sonar beamforming",
+        provider_id="strong",
+        year=2020,
+    ).model_copy(update={"acoustic_relevance": 0.9})
+
+    ranked = search.rank_papers(
+        "acoustic sensing",
+        [weak, strong],
+        current_year=2026,
+        journal_mode=True,
+    )
+
+    assert [item.provider_id for item in ranked] == ["strong", "weak"]
+
+
+def test_journal_mode_sorts_abstract_completeness_before_recency() -> None:
+    pending = paper(
+        "Underwater acoustic localization",
+        provider_id="pending-new",
+        abstract="",
+        year=2026,
+    ).model_copy(update={"acoustic_relevance": 0.7})
+    complete = paper(
+        "Underwater acoustic localization",
+        provider_id="complete-old",
+        abstract="Field measurements.",
+        year=2020,
+    ).model_copy(update={"acoustic_relevance": 0.7})
+
+    ranked = search.rank_papers(
+        "underwater acoustic localization",
+        [pending, complete],
+        current_year=2026,
+        journal_mode=True,
+    )
+
+    assert [item.provider_id for item in ranked] == ["complete-old", "pending-new"]

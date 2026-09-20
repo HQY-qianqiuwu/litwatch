@@ -4,6 +4,7 @@ import sqlite3
 
 from litwatch.core import Paper, ProviderAlias
 from litwatch.core.identity import normalize_arxiv_id, normalize_doi, normalized_title
+from litwatch.journals import JOURNAL_REGISTRY
 
 
 def prepare_paper(paper: Paper) -> Paper:
@@ -93,4 +94,42 @@ def enrich(existing: Paper, incoming: Paper) -> Paper:
     updated.arxiv_id = existing.arxiv_id or incoming.arxiv_id
     updated.url = existing.url or incoming.url
     updated.score = max(existing.score, incoming.score)
+    updated.journal_reference = incoming.journal_reference or existing.journal_reference
+    updated.journal_issns = list(
+        dict.fromkeys([*existing.journal_issns, *incoming.journal_issns])
+    )
+    updated.journal_source_ids = {
+        **incoming.journal_source_ids,
+        **existing.journal_source_ids,
+    }
+    updated.acoustic_relevance = max(
+        existing.acoustic_relevance,
+        incoming.acoustic_relevance,
+    )
+    resolved = (
+        JOURNAL_REGISTRY.resolve_identity(issns=incoming.journal_issns)
+        or JOURNAL_REGISTRY.resolve_identity(issns=existing.journal_issns)
+        or JOURNAL_REGISTRY.resolve_identity(
+            provider_source_ids=incoming.journal_source_ids
+        )
+        or JOURNAL_REGISTRY.resolve_identity(
+            provider_source_ids=existing.journal_source_ids
+        )
+        or JOURNAL_REGISTRY.resolve_identity(internal_id=incoming.journal_id)
+        or JOURNAL_REGISTRY.resolve_identity(internal_id=existing.journal_id)
+        or JOURNAL_REGISTRY.resolve_identity(name=incoming.journal)
+        or JOURNAL_REGISTRY.resolve_identity(name=existing.journal)
+    )
+    if resolved is None:
+        updated.journal = incoming.journal or existing.journal
+        updated.journal_id = incoming.journal_id or existing.journal_id
+        updated.is_priority_journal = (
+            existing.is_priority_journal or incoming.is_priority_journal
+        )
+    else:
+        updated.journal = resolved.canonical_name
+        updated.journal_id = resolved.journal_id
+        updated.journal_issns = list(resolved.issns)
+        updated.journal_source_ids = dict(resolved.provider_source_ids)
+        updated.is_priority_journal = resolved.priority > 0
     return updated

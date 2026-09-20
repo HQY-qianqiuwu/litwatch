@@ -21,6 +21,8 @@ def _merge(records: list[Paper]) -> Paper:
     merged = records[0].model_copy(deep=True)
     merged.doi = normalize_doi(merged.doi)
     merged.arxiv_id = normalize_arxiv_id(merged.arxiv_id)
+    merged.journal_issns = list(dict.fromkeys(merged.journal_issns))
+    merged.journal_source_ids = dict(merged.journal_source_ids)
     merged.aliases = list(
         {
             (alias.provider.casefold(), alias.provider_id.casefold()): alias
@@ -44,6 +46,21 @@ def _merge(records: list[Paper]) -> Paper:
         merged.arxiv_id = merged.arxiv_id or normalize_arxiv_id(item.arxiv_id)
         merged.year = merged.year if merged.year is not None else item.year
         merged.url = merged.url or item.url
+        merged.journal = merged.journal or item.journal
+        merged.journal_reference = merged.journal_reference or item.journal_reference
+        merged.journal_id = merged.journal_id or item.journal_id
+        merged.journal_issns = list(
+            dict.fromkeys([*merged.journal_issns, *item.journal_issns])
+        )
+        for provider, source_id in item.journal_source_ids.items():
+            merged.journal_source_ids.setdefault(provider, source_id)
+        merged.acoustic_relevance = max(
+            merged.acoustic_relevance,
+            item.acoustic_relevance,
+        )
+        merged.is_priority_journal = (
+            merged.is_priority_journal or item.is_priority_journal
+        )
     return merged
 
 
